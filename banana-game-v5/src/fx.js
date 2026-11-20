@@ -74,6 +74,6 @@ export function announce({ html, title, desc, hot }) {
   el.querySelector('.a-title').textContent = title;
   el.querySelector('.a-desc').textContent = desc;
   fxLayer().appendChild(el);
-  const ms = reduce ? 1800 : 2600;
+  const ms = 3000;
   return new Promise((res) => setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); res(); }, 250); }, ms));
 }

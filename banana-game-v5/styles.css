@@ -338,3 +338,29 @@ table.scores tr.win td { background: #fff0b0; font-weight: 800; }
 .go-row .chip b { font-size: 1.3rem; }
 .go-rounds { display: flex; gap: 3px; }
 .go-rounds i { font-style: normal; font-size: .72rem; font-weight: 800; background: #f1e2b8; border-radius: 6px; padding: 0 5px; }
+/* smaller command announcement: card beside the text */
+.announce { width: min(88vw, 330px); display: grid; grid-template-columns: 74px 1fr; grid-template-areas: 'c t' 'c d'; align-items: center; column-gap: 12px; row-gap: 4px; padding: 10px 12px; border-width: 3px; border-radius: 18px; }
+.announce .a-card { grid-area: c; width: 74px; }
+.announce .a-card .card-img { box-shadow: 0 0 0 3px var(--banana), 0 0 14px 4px rgba(255,216,77,.6); }
+.announce .a-title { grid-area: t; font-size: 1.15rem; text-align: start; align-self: end; }
+.announce .a-desc { grid-area: d; font-size: .8rem; line-height: 1.4; text-align: start; align-self: start; }
+
+
+/* ---------- photo backdrop (home + rules) ---------- */
+.screen.photo { background: #2c6b3c url('cards/bg-jungle.webp') center top / cover no-repeat; }
+.screen.photo::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 45%, rgba(10,30,15,.35) 100%); }
+.screen.photo.home .screen-in { gap: 14px; }
+.screen.photo.home .logo { width: min(62vw, 250px); margin: 0 auto; }
+.screen.photo.home .spacer { flex: 1; min-height: 10px; }
+.screen.photo .field .ribbon, .screen.photo .ltitle { filter: drop-shadow(0 2px 3px rgba(0,0,0,.35)); }
+.me-row .field { min-width: 0; }
+.field input { width: 100%; box-sizing: border-box; min-width: 0; }
+.screen.photo.home .spacer.top { flex: 2.2; }
+
+/* ---------- table colours ---------- */
+.game { background: #5a2f14 right top / cover no-repeat; }
+.tb-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tb-opt { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 6px; border-radius: 14px; background: #fff; border: 3px solid var(--ink); box-shadow: 0 4px 0 var(--ink); color: var(--ink); cursor: pointer; }
+.tb-opt span { width: 100%; aspect-ratio: 3/4; border-radius: 9px; border: 2px solid var(--ink); background-size: cover; background-position: center; }
+.tb-opt b { font-size: .95rem; }
+.tb-opt.on { background: var(--banana); box-shadow: 0 4px 0 var(--ink), 0 0 14px 3px rgba(255,216,77,.8); }

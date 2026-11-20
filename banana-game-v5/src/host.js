@@ -5,8 +5,24 @@ import { Bot } from './bot.js';
 
 // Seconds per decision. `turn` applies to the player whose turn it is
 // (every step of his turn); the short prompts give everyone 5 s.
-export const TIMERS = { turn: 15, quick: 5 };
+export const TIMERS = { turn: 15, quick: 8 };
 const QUICK = new Set(['guard', 'snapWindow', 'delegate']);
+
+// How long the players' screens need to show what just happened (card moves,
+// command announcements). Nobody — bot or timer — moves on before that.
+const ANNOUNCE_MS = 3700;
+function paceOf(e) {
+  switch (e.type) {
+    case 'effect': return ANNOUNCE_MS;
+    case 'targeted': return e.target !== e.by ? ANNOUNCE_MS : 0;
+    case 'chose': return ANNOUNCE_MS;
+    case 'guarded': return e.self && e.ok ? ANNOUNCE_MS : 1000;
+    case 'discarded': return e.replaced ? 1400 : 900;
+    case 'filled': case 'gave': case 'swapped': case 'snap': case 'markerOff': case 'plus': case 'freeze': case 'peeked': case 'guardUsed': return 1000;
+    case 'shuffled': case 'tornado': return 1300;
+    default: return 0;
+  }
+}
 
 export class Host {
   constructor({ mode, players, timed = true, seed = Date.now() & 0x7fffffff, botDelay = 900, onError }) {
@@ -22,6 +38,9 @@ export class Host {
     this.timer = null;
     this.deadline = null;
     this.paused = false;
+    this.pacing = botDelay >= 300; // real play (tests run fast)
+    this.busyUntil = 0;
+    this.paceSeq = this.state.seq;
   }
 
   subscribe(pid, cb) {
@@ -66,6 +85,13 @@ export class Host {
   }
 
   afterChange() {
+    if (this.pacing) {
+      const now = Date.now();
+      let ms = 0;
+      for (const e of this.state.events) if (e.seq > this.paceSeq) ms += paceOf(e);
+      this.paceSeq = this.state.seq;
+      if (ms) this.busyUntil = Math.max(this.busyUntil, now) + ms;
+    }
     this.deadline = null;
     clearTimeout(this.timer);
     this.schedule();
@@ -88,7 +114,7 @@ export class Host {
     const bot = who.find((q) => this.isBot(q));
     if (bot) {
       const delay = p.kind === 'roundOver' ? Math.max(this.botDelay, 4000 * (this.botDelay >= 300)) : p.kind === 'ready' ? 300 : QUICK.has(p.kind) ? Math.min(600, this.botDelay) : this.botDelay;
-      this.timer = setTimeout(() => this.botMove(bot), delay);
+      this.timer = setTimeout(() => this.botMove(bot), delay + this.slack());
       return;
     }
     if (p.kind === 'roundOver') return; // host taps "next round"
@@ -102,16 +128,19 @@ export class Host {
     }
     if (!this.timed) return;
     const secs = QUICK.has(p.kind) ? TIMERS.quick : TIMERS.turn;
-    this.deadline = Date.now() + secs * 1000;
+    const slack = this.slack();
+    this.deadline = Date.now() + slack + secs * 1000;
     this.timer = setTimeout(() => {
       for (const q of this.waitingOn()) {
         try { act(this.state, q, { t: 'timeout' }); } catch (e) { if (!(e instanceof RuleError)) this.onError(e); }
         if (!this.state.pending || !this.waitingOn().includes(q)) break;
       }
       this.afterChange();
-    }, secs * 1000 + 300);
+    }, slack + secs * 1000 + 300);
     this.pushAll();
   }
+
+  slack() { return this.pacing ? Math.max(0, this.busyUntil - Date.now()) : 0; }
 
   botMove(pid) {
     let a;

@@ -85,7 +85,75 @@ function banner(text, ms = 1100) {
 function buzz() { try { navigator.vibrate && navigator.vibrate(40); } catch {} }
 
 // ------------------------------------------------------------ incoming updates
-function onUpdate(view, events) {
+// Updates are applied in order. When a card's power is played, the big
+// announcement shows first (3s) and everything that follows waits for it.
+const updQ = [];
+function resetUpdates() { updQ.length = 0; ui.gated = false; ui.pumping = false; ui.gen = (ui.gen || 0) + 1; }
+function onUpdate(view, events) { updQ.push([view, events]); pumpUpdates(); }
+// What the choose option does, told to everyone after the choice.
+const CHOSE_AR = {
+  observe: ['هيبُص على كارت عند كل لاعب', 'هيختار كارت من عند كل لاعب ويبُص عليه لوحده — وكل لاعب يقدر يحمي كارته بـ Guard'],
+  shuffle: ['هيخلط كروت لاعب', 'هيختار لاعب وكروته هتتلخبط أماكنها، ومش هيعرف فين كل كارت'],
+  skip: ['هيخلّي لاعب يفوّت دوره', 'هيختار لاعب مش هيلعب الدور الجاي بتاعه'],
+  peek: ['هيبُص على أول كارت في الكومة', 'هيعرف الكارت اللي هيتسحب بعد كده من الكومة'],
+  activate: ['هيشغّل أمر من كروته', 'هيختار كارت من كروته — لو طلع أمر هيشتغل، ولو طلع مش أمر هيلبس كارت زيادة'],
+};
+
+// Events that stop the game for a big announcement before anything else.
+function gateOf(e) {
+  const by = (pid) => (pid === ui.me ? 'إنت' : pname(pid));
+  if (e.type === 'effect' && CARD_DESC[e.card]) {
+    return { card: e.card, title: `${by(e.pid)} ${e.pid === ui.me ? 'لعبت' : 'لعب'} ${cardName(e.card)}${e.viaCopy ? ' (بـ Copy)' : ''}`, desc: CARD_DESC[e.card] };
+  }
+  if (e.type === 'targeted' && e.target !== e.by) {
+    const onMe = e.target === ui.me;
+    return { card: e.card, hot: onMe, title: onMe ? `${by(e.by)} هيعمل عليك ${cardName(e.card)}!` : `${by(e.by)} ${e.by === ui.me ? 'هتعمل' : 'هيعمل'} ${cardName(e.card)} على ${by(e.target)}`, desc: CARD_DESC[e.card] };
+  }
+  if (e.type === 'chose' && CHOSE_AR[e.option]) {
+    return { card: 'choose', title: `${by(e.pid)} اختار: ${CHOSE_AR[e.option][0]}`, desc: CHOSE_AR[e.option][1] };
+  }
+  if (e.type === 'guarded' && e.self && e.ok) {
+    return { card: 'guard', title: `${by(e.pid)} رفض ${cardName(e.card)} بالـ Guard`, desc: 'الأمر اتلغى، والـ Guard راح الأرض' };
+  }
+  return null;
+}
+
+const fxIdle = () => new Promise((res) => FX.enqueue(() => res()));
+
+async function pumpUpdates() {
+  if (ui.pumping) return;
+  ui.pumping = true;
+  const gen = ui.gen;
+  try {
+    while (updQ.length) {
+      const [view, events] = updQ.shift();
+      if (ui.screen !== 'game') { applyUpdate(view, events); continue; }
+      let rest = events;
+      for (;;) {
+        const k = rest.findIndex(gateOf);
+        if (k < 0) { applyUpdate(view, rest); break; }
+        const g = gateOf(rest[k]);
+        ui.gated = true;
+        applyUpdate(view, rest.slice(0, k + 1));
+        await fxIdle();
+        if (gen !== ui.gen) return;
+        await announce(g.card, g.title, g.hot, g.desc);
+        if (gen !== ui.gen) return;
+        rest = rest.slice(k + 1);
+      }
+      // Let every card move of this step finish before the next one shows.
+      ui.gated = true;
+      await fxIdle();
+      if (gen !== ui.gen) return;
+    }
+    ui.gated = false;
+    if (ui.screen === 'game' && ui.view) render();
+  } finally {
+    if (gen === ui.gen) ui.pumping = false;
+  }
+}
+
+function applyUpdate(view, events) {
   const wasMyTurn = ui.view && ui.view.current === ui.me && ui.view.waitingKind === 'turn';
   const before = ui.screen === 'game' && ui.view ? FX.snapshot($app) : null;
   const oldView = ui.view;
@@ -132,8 +200,8 @@ function lightUp(ids, cls = 'land') {
 }
 function slotsOf(view, pid) { const p = view && view.players.find((x) => x.id === pid); return p ? p.slots.map((s) => s.id) : []; }
 
-function announce(card, title, onMe = false) {
-  return FX.announce({ html: cardSVG(card), title, desc: CARD_DESC[card] || '', hot: onMe });
+function announce(card, title, onMe = false, desc = null) {
+  return FX.announce({ html: cardSVG(card), title, desc: desc ?? (CARD_DESC[card] || ''), hot: onMe });
 }
 
 function animate(events, B, A, oldView) {
@@ -256,12 +324,6 @@ function animate(events, B, A, oldView) {
           else if (e.newSlot) { await FX.fly(B.discard, A[e.newSlot], { face: e.penalty, flipTo: 'back', dur: 600 }); lightUp([e.newSlot]); }
         });
         break;
-      case 'effect':
-        if (CARD_DESC[e.card]) FX.enqueue(() => announce(e.card, `${pname(e.pid)} ${e.pid === ui.me ? 'لعبت' : 'لعب'} ${cardName(e.card)}${e.viaCopy ? ' (بـ Copy)' : ''}`));
-        break;
-      case 'targeted':
-        if (e.target !== e.by) FX.enqueue(() => announce(e.card, `${pname(e.by)} ${e.by === ui.me ? 'هتعمل' : 'هيعمل'} ${cardName(e.card)} على ${e.target === ui.me ? 'إنت' : pname(e.target)}`, e.target === ui.me));
-        break;
       case 'reveal':
         for (const it of e.items) if (it.slotId) lightUp([it.slotId], 'none');
         break;
@@ -309,7 +371,6 @@ function handleEvent(e) {
     case 'guarded':
       if (e.self) {
         log(e.ok ? `${n(e.pid)} رفض ${cardName(e.card)} بـ Guard` : `${n(e.pid)} كشف كارت غلط ولبس كارت — و${cardName(e.card)} هيتنفذ`);
-        if (e.ok) FX.enqueue(() => announce('guard', `${n(e.pid)} رفض ${cardName(e.card)} بالـ Guard`));
       } else log(e.ok ? `${n(e.pid)} صدّ ${cardName(e.card)} بـ Guard!` : `${n(e.pid)} كشف كارت غلط ولبس كارت`);
       break;
     case 'skipped': log(`${n(e.pid)} فوّت دوره`); break;
@@ -346,14 +407,14 @@ function startBots() {
   ui.me = 'me';
   ui.conn = { act: (a) => host.act('me', a), leave: () => host.destroy(), isHost: true, host, local: true };
   ui.screen = 'game';
-  ui.view = null; ui.reveals = {}; ui.logs = []; ui.gameOver = null; ui.lastRoundEnd = null;
+  ui.view = null; ui.reveals = {}; ui.logs = []; ui.gameOver = null; ui.lastRoundEnd = null; resetUpdates();
   host.subscribe('me', onUpdate);
 }
 
 function leaveGame() {
   const c = ui.conn;
   ui.conn = null;
-  if (c) c.leave(); ui.view = null; ui.screen = 'home'; ui.sheet = null; ui.lobby = null;
+  if (c) c.leave(); resetUpdates(); ui.view = null; ui.screen = 'home'; ui.sheet = null; ui.lobby = null;
   render();
 }
 
@@ -385,7 +446,8 @@ function leafSVG(cls, style) {
 }
 const LEAVES = leafSVG('', 'left:-70px;bottom:-30px;transform:rotate(-10deg)') + leafSVG('', 'right:-80px;bottom:60px;transform:scaleX(-1) rotate(-14deg)') + leafSVG('', 'left:-90px;top:-40px;transform:rotate(30deg) scale(.7)') + leafSVG('', 'right:-90px;top:-50px;transform:scaleX(-1) rotate(30deg) scale(.7)');
 
-function screen(inner) {
+function screen(inner, { photo = false, cls = '' } = {}) {
+  if (photo) return `<div class="screen photo ${cls}"><div class="screen-in">${inner}</div></div>`;
   return `<div class="screen jungle">${LEAVES}<div class="screen-in">${inner}</div></div>`;
 }
 const backBtn = (to) => `<button class="round" data-go="${to}" aria-label="رجوع" style="align-self:flex-start">${ICON.back}</button>`;
@@ -399,12 +461,14 @@ function avatarSheet() {
 
 function renderHome() {
   $app.innerHTML = screen(`
+    <div class="spacer top"></div>
     <img class="logo" src="cards/logo.webp" alt="بانانا">
+    <div class="spacer"></div>
     <div class="me-row"><button class="avatar pick-av" data-sheet="avatar" aria-label="غيّر صورتك">${avatarInner(myAvatar())}<i class="pen">✎</i></button>
     <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ''}
     <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
     <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
-    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>`);
+    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>`, { photo: true, cls: 'home' });
 }
 
 function renderBotSetup() {
@@ -425,7 +489,7 @@ function renderRules() {
   const i = Math.min(ui.learnPage || 0, LEARN.length - 1);
   $app.innerHTML = screen(`
     <div style="display:flex;justify-content:space-between;align-items:center;width:100%">${backBtn('home')}<button class="mini-btn" data-go="cards">كل الكروت</button></div>
-    ${learnHTML(i)}`);
+    ${learnHTML(i)}`, { photo: true });
   LS.set('learned', 1);
 }
 
@@ -433,7 +497,7 @@ function renderCards() {
   const names = Object.keys(CARD_INFO);
   $app.innerHTML = screen(`
     ${backBtn('rules')}
-    <div class="glossary big">${names.map((n) => `<div class="gl">${cardSVG(n)}<p>${CARD_DESC[n] || ({ minus: 'سالب ١ — أحلى كارت' }[n] || 'رقم عادي')}</p></div>`).join('')}</div>`);
+    <div class="glossary big">${names.map((n) => `<div class="gl">${cardSVG(n)}<p>${CARD_DESC[n] || ({ minus: 'سالب ١ — أحلى كارت' }[n] || 'رقم عادي')}</p></div>`).join('')}</div>`, { photo: true });
 }
 
 function renderOnline() {
@@ -521,6 +585,7 @@ function slotHTML(s, owner, opts = {}) {
 }
 
 function pickableSlots() {
+  if (ui.gated) return new Set();
   const v = ui.view, p = v.pending, sel = ui.sel;
   const set = new Set();
   if (!p) return set;
@@ -616,6 +681,14 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   </div>`;
 }
 
+const TABLES = [['wood', 'خشب'], ['purple', 'بنفسجي'], ['blue', 'أزرق'], ['black', 'أسود'], ['green', 'أخضر'], ['teal', 'تركواز']];
+function myTable() { const t = LS.get('table'); return TABLES.some((x) => x[0] === t) ? t : 'wood'; }
+function tableSheet() {
+  const cur = myTable();
+  return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>لون الترابيزة</h2><p>اختار اللون اللي يريحك — تقدر تغيّره في أي وقت.</p>
+    <div class="tb-grid">${TABLES.map(([id, nm]) => `<button class="tb-opt ${id === cur ? 'on' : ''}" data-tb="${id}"><span style="background-image:url('cards/table-${id}.webp')"></span><b>${nm}</b></button>`).join('')}</div>
+    <button class="plank cream" data-close="1" style="width:100%;margin-top:12px">رجوع</button></div></div>`;
+}
 const PROPS = `<svg class="prop" style="left:22%;top:63%;transform:rotate(-14deg)" width="96" height="62" viewBox="0 0 110 70" aria-hidden="true"><path d="M8 40 C 20 62, 70 66, 100 34 C 104 30, 100 26, 96 28 C 70 48, 36 48, 16 32 C 10 28, 4 34, 8 40 Z" fill="#ffd84d" stroke="#2a1608" stroke-width="4" stroke-linejoin="round"/><path d="M14 22 C 26 44, 72 46, 98 16 C 102 12, 98 8, 94 10 C 70 30, 38 30, 20 14 C 14 10, 10 16, 14 22 Z" fill="#ffe680" stroke="#2a1608" stroke-width="4" stroke-linejoin="round"/><path d="M94 10 l8 -6 M96 28 l8 -4" stroke="#6d4c1d" stroke-width="5" stroke-linecap="round"/></svg>
 <svg class="prop" style="right:16%;top:9%;transform:rotate(10deg)" width="58" height="58" viewBox="0 0 74 74" aria-hidden="true"><circle cx="12" cy="34" r="10" fill="#a0612d" stroke="#2a1608" stroke-width="4"/><circle cx="62" cy="34" r="10" fill="#a0612d" stroke="#2a1608" stroke-width="4"/><circle cx="37" cy="36" r="27" fill="#a0612d" stroke="#2a1608" stroke-width="4"/><path d="M18 40 C 18 26, 30 22, 37 30 C 44 22, 56 26, 56 40 C 56 54, 46 60, 37 60 C 28 60, 18 54, 18 40 Z" fill="#f2c59a" stroke="#2a1608" stroke-width="3"/><circle cx="30" cy="36" r="3.4" fill="#2a1608"/><circle cx="44" cy="36" r="3.4" fill="#2a1608"/><path d="M30 48 q7 6 14 0" stroke="#2a1608" stroke-width="3" fill="none" stroke-linecap="round"/></svg>`;
 
@@ -644,7 +717,7 @@ function renderGame() {
     if (fromFloor) heldFloor = el; else heldDeck = el;
   }
 
-  $app.innerHTML = `<div class="game">
+  $app.innerHTML = `<div class="game" style="background-image:url('cards/table-${myTable()}.webp')">
   <div class="topbar">
     <span class="round-chip wood">الجولة ${v.round}/5${typeChip ? `<small>${typeChip}</small>` : ''}</span>
     <span class="row">
@@ -653,8 +726,6 @@ function renderGame() {
     </span>
   </div>
   <div class="table-area">
-    <div class="table-wood"></div>
-    ${PROPS}
     ${seats.join('')}
     <div class="center">
       <div class="piles">
@@ -675,6 +746,7 @@ function renderGame() {
 }
 
 function actionsHTML() {
+  if (ui.gated) return '';
   const v = ui.view, p = v.pending, sel = ui.sel, me = meP();
   if (!p) return '';
   const snapBtn = (label = 'بصّر') => `<button class="plank teal ${sel.mode === 'snap' ? 'on' : ''}" data-ui="snap-mode" ${v.discardTop ? '' : 'disabled'}>${label}</button>`;
@@ -717,6 +789,7 @@ function effectNote(name) {
 }
 
 function boardOrSheet() {
+  if (ui.gated && !['menu', 'scores', 'rules-mini', 'learn', 'table'].includes(ui.sheet)) return '';
   const h = sheetHTML();
   if (!h.includes('woodboard')) ui.boardShown = null;
   return h;
@@ -730,6 +803,7 @@ function sheetHTML() {
       <h2>القائمة</h2>
       <div class="opts">
         <button class="opt" data-sheet="learn"><b>ازاي ألعب؟</b><span>شرح بسيط للعبة خطوة بخطوة</span></button>
+        <button class="opt" data-sheet="table"><b>لون الترابيزة</b><span>خشب، بنفسجي، أزرق، أسود…</span></button>
         <button class="opt" data-sheet="rules-mini"><b>الكروت</b><span>شوف كل كارت بيعمل إيه</span></button>
         <button class="opt" data-ui="leave"><b>اخرج من الجيم</b><span>${ui.conn && ui.conn.local ? 'الجيم هيتقفل' : 'روبوت هيلعب مكانك'}</span></button>
         <button class="plank cream" data-close="1">رجوع</button>
@@ -738,6 +812,7 @@ function sheetHTML() {
   if (ui.sheet === 'learn') {
     return `<div class="sheet-bg" data-close="1"><div class="sheet">${learnHTML(Math.min(ui.learnPage || 0, LEARN.length - 1), { inGame: true })}</div></div>`;
   }
+  if (ui.sheet === 'table') return tableSheet();
   if (ui.sheet === 'rules-mini') {
     return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>الكروت</h2><div class="glossary">${Object.keys(CARD_INFO).map((n) => `<div>${cardSVG(n)}</div>`).join('')}</div><button class="plank cream" data-close="1" style="width:100%;margin-top:10px">رجوع</button></div></div>`;
   }
@@ -870,7 +945,7 @@ function startTimerBar() {
   cancelAnimationFrame(timerRAF);
   const v = ui.view;
   if (!v || !v.deadline) return;
-  const total = ['guard', 'snapWindow', 'delegate'].includes(v.waitingKind) ? 5000 : 15000;
+  const total = ['guard', 'snapWindow', 'delegate'].includes(v.waitingKind) ? 8000 : 15000;
   const tick = () => {
     const left = Math.max(0, ui.view.deadline - Date.now());
     const f = Math.min(1, left / total);
@@ -920,7 +995,7 @@ function onSlotTap(slotId, owner) {
 }
 
 $app.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
+  const t = ev.target.closest('[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
   if (!t) return;
   const d = t.dataset;
   const nm = document.getElementById('nm');
@@ -943,6 +1018,7 @@ $app.addEventListener('click', (ev) => {
     return Net.joinRoom(netCtx(), code);
   }
   if (d.lobby) return ui.lobby && ui.lobby.handle(d.lobby, +d.i);
+  if (d.tb) { LS.set('table', d.tb); return render(); }
   if (d.av) { LS.set('avatar', d.av); ui.sheet = null; return render(); }
   if (d.sheet) { if (d.sheet === 'learn') ui.learnPage = 0; ui.sheet = d.sheet; return render(); }
   if (d.a) {
@@ -984,7 +1060,7 @@ function netCtx() {
     lobbyChanged() { if (ui.screen === 'lobby') render(); },
     startGame(conn, pid) {
       ui.conn = conn; ui.me = pid; ui.screen = 'game';
-      ui.view = null; ui.reveals = {}; ui.logs = []; ui.gameOver = null; ui.lastRoundEnd = null;
+      ui.view = null; ui.reveals = {}; ui.logs = []; ui.gameOver = null; ui.lastRoundEnd = null; resetUpdates();
       render();
     },
     update: onUpdate,
