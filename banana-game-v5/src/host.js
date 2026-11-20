@@ -87,11 +87,19 @@ export class Host {
     const who = this.waitingOn();
     const bot = who.find((q) => this.isBot(q));
     if (bot) {
-      const delay = p.kind === 'roundOver' ? Math.max(this.botDelay, 4000 * (this.botDelay >= 300)) : QUICK.has(p.kind) ? Math.min(600, this.botDelay) : this.botDelay;
+      const delay = p.kind === 'roundOver' ? Math.max(this.botDelay, 4000 * (this.botDelay >= 300)) : p.kind === 'ready' ? 300 : QUICK.has(p.kind) ? Math.min(600, this.botDelay) : this.botDelay;
       this.timer = setTimeout(() => this.botMove(bot), delay);
       return;
     }
     if (p.kind === 'roundOver') return; // host taps "next round"
+    if (p.kind === 'ready') {
+      // everyone looks at their 2 cards until they press start (30 s cap when timed)
+      if (!this.timed) return;
+      this.deadline = Date.now() + 30000;
+      this.timer = setTimeout(() => { for (const q of this.waitingOn()) { try { act(this.state, q, { t: 'ready' }); } catch (e) {} } this.afterChange(); }, 30300);
+      this.pushAll();
+      return;
+    }
     if (!this.timed) return;
     const secs = QUICK.has(p.kind) ? TIMERS.quick : TIMERS.turn;
     this.deadline = Date.now() + secs * 1000;

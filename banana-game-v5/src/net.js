@@ -10,8 +10,9 @@
 // rooms/{code}/out/{pid}/ev    batches of events (JSON strings)
 import { getStore, isLocalOnly } from './store.js';
 import { Host } from './host.js';
+import { pickBotNames } from './bot.js';
+import { nextBotAvatar } from './avatars.js';
 
-const BOT_NAMES = ['موزو', 'بنبون', 'موزيكا'];
 const maxSeats = (s) => (s.mode === 'team' ? 4 : s.count);
 
 export function myId() {
@@ -55,7 +56,7 @@ export async function createRoom(ctx) {
   if (!code) return ctx.error('حاول تاني بعد شوية.');
   const s = ctx.setup();
   const settings = { mode: s.mode, count: s.count, timed: s.timed, level: s.level };
-  const seats = [{ id: me, name: ctx.name(), host: true }, null, null, null];
+  const seats = [{ id: me, name: ctx.name(), av: ctx.avatar(), host: true }, null, null, null];
   await st.set(`rooms/${code}`, { meta: { host: me, settings, status: 'lobby', created: Date.now() }, seats: seatsObj(seats) });
   st.set(`rooms/${code}/presence/${me}`, true);
   st.onDisconnectRemove(`rooms/${code}/presence/${me}`);
@@ -76,8 +77,8 @@ export async function createRoom(ctx) {
     if (cmd === 'share') return shareCode(code);
     if (cmd === 'bot' && !L.seats[i]) {
       const used = names();
-      const nm = BOT_NAMES.find((b) => !used.includes(b + ' 🤖')) || 'روبوت';
-      L.seats[i] = { id: 'bot' + i + Math.random().toString(36).slice(2, 5), name: nm + ' 🤖', bot: true };
+      const nm = pickBotNames(20, used).find((b) => !used.includes(b)) || 'روبوت';
+      L.seats[i] = { id: 'bot' + i + Math.random().toString(36).slice(2, 5), name: nm, bot: true, av: nextBotAvatar(L.seats.filter(Boolean).map((x) => x.av)) };
       save(); return ctx.lobbyChanged();
     }
     if (cmd === 'kick' && L.seats[i] && L.seats[i].bot) { L.seats[i] = null; save(); return ctx.lobbyChanged(); }
@@ -94,7 +95,7 @@ export async function createRoom(ctx) {
       const max = maxSeats(L.settings);
       const free = L.seats.findIndex((x, i) => i < max && !x);
       if (free < 0) { st.set(`rooms/${code}/replies/${msg.from}`, 'full'); return; }
-      L.seats[free] = { id: msg.from, name: String(msg.name || 'لاعب').slice(0, 14) };
+      L.seats[free] = { id: msg.from, name: String(msg.name || 'لاعب').slice(0, 14), av: typeof msg.av === 'string' ? msg.av.slice(0, 8) : null };
       save(); ctx.lobbyChanged(); ctx.toast(`${L.seats[free].name} دخل الأوضة`);
     } else if (msg.type === 'leave') {
       const i = L.seats.findIndex((x) => x && x.id === msg.from);
@@ -139,7 +140,7 @@ export async function createRoom(ctx) {
     const max = maxSeats(L.settings);
     const seats = L.seats.slice(0, max);
     if (seats.some((x) => !x)) return ctx.toast('كمّل الأماكن الفاضية بروبوتات أو استنى صحابك');
-    const players = seats.map((x) => ({ id: x.id, name: x.name, bot: x.bot ? L.settings.level : undefined }));
+    const players = seats.map((x) => ({ id: x.id, name: x.name, av: x.av || null, bot: x.bot ? L.settings.level : undefined }));
     const game = new Host({ mode: L.settings.mode, players, timed: L.settings.timed });
     L.game = game;
     await st.update(`rooms/${code}`, { 'meta/status': 'playing', 'meta/started': Date.now() });
@@ -186,7 +187,7 @@ export async function joinRoom(ctx, code) {
 
   st.set(`rooms/${code}/presence/${me}`, true);
   st.onDisconnectRemove(`rooms/${code}/presence/${me}`);
-  if (!seated) st.push(`rooms/${code}/inbox`, { type: 'join', from: me, name: ctx.name() });
+  if (!seated) st.push(`rooms/${code}/inbox`, { type: 'join', from: me, name: ctx.name(), av: ctx.avatar() });
 
   const L = { code, isHost: false, settings: meta.settings, seats: seatsNow, unsubs: [], started: false };
   const cleanup = () => L.unsubs.forEach((u) => u());

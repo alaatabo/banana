@@ -21,6 +21,8 @@ export function randomAction(state, pid, rnd) {
     case 'hold': {
       const free = me.slots.filter((s) => !s.freeze && !s.locked);
       if (pend.from === 'discard' || (rnd() < 0.5 && free.length)) return { t: 'keep', slotId: pick(free).id };
+      const cn = nameOf(state, pend.card);
+      if (isCmd(cn) && cn !== 'guard' && mySlots.length && rnd() < 0.3) return { t: 'throwGuard', slotId: pick(mySlots).id };
       return { t: 'throw' };
     }
     case 'extra': {
@@ -42,6 +44,7 @@ export function randomAction(state, pid, rnd) {
       return { t: 'pass' };
     }
     case 'roundOver': return { t: 'next' };
+    case 'ready': return { t: 'ready' };
     default: throw new Error('no action for ' + pend.kind);
   }
 }

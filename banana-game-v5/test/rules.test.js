@@ -635,3 +635,24 @@ test('guard in your own turn removes one plus (or a freeze) from your own slot; 
   rejects(() => act(st, 'p1', { t: 'guardRemove', targetSlot: t2.id, guardSlot: slots(st, 'p1')[0].id, what: 'plus' }));
   checkInvariants(st);
 });
+
+test('refuse your own drawn command with a guard; wrong card = take the card under it and the command runs', () => {
+  let st = setup({ hands: { p0: ['guard', 'n1', 'n2', 'n3'] }, deckTop: ['tornado'], discard: ['n4'] });
+  act(st, 'p0', { t: 'draw' });
+  act(st, 'p0', { t: 'throwGuard', slotId: slots(st, 'p0')[0].id });
+  assert.deepEqual(names(st, 'p0'), ['n1', 'n2', 'n3']);
+  assert.equal(top(st), 'guard');
+  assert.equal(st.current, 'p1', 'command cancelled, turn over');
+  checkInvariants(st);
+
+  st = setup({ hands: { p0: ['n9', 'n1', 'n2', 'n3'] }, deckTop: ['plus'], discard: ['n4'] });
+  act(st, 'p0', { t: 'draw' });
+  act(st, 'p0', { t: 'throwGuard', slotId: slots(st, 'p0')[0].id });
+  assert.deepEqual(names(st, 'p0'), ['n9', 'n1', 'n2', 'n3', 'n4'], 'penalty: the card under the command');
+  assert.equal(st.pending.kind, 'target', 'the command still runs');
+  checkInvariants(st);
+
+  st = setup({ hands: { p0: ['guard', 'n1', 'n2', 'n3'] }, deckTop: ['n7'], discard: ['n4'] });
+  act(st, 'p0', { t: 'draw' });
+  rejects(() => act(st, 'p0', { t: 'throwGuard', slotId: slots(st, 'p0')[0].id }), 'numbers cannot be refused');
+});

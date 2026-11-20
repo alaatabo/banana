@@ -65,3 +65,15 @@ export function enqueue(fn) {
   return chain;
 }
 export const busy = () => pending > 0;
+
+// Big center announcement: the card, who played it on whom, and what it does.
+export function announce({ html, title, desc, hot }) {
+  const el = document.createElement('div');
+  el.className = 'announce' + (hot ? ' hot' : '');
+  el.innerHTML = `<div class="a-card">${html}</div><div class="a-title"></div><div class="a-desc"></div>`;
+  el.querySelector('.a-title').textContent = title;
+  el.querySelector('.a-desc').textContent = desc;
+  fxLayer().appendChild(el);
+  const ms = reduce ? 1800 : 2600;
+  return new Promise((res) => setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); res(); }, 250); }, ms));
+}

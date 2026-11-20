@@ -114,6 +114,7 @@ export class Bot {
         return s ? { t: 'snap', slotId: s.id } : { t: 'pass' };
       }
       case 'roundOver': return { t: 'next' };
+      case 'ready': return { t: 'ready' };
       default: return { t: 'timeout' };
     }
   }
@@ -282,4 +283,13 @@ export class Bot {
       default: return { t: 'timeout' };
     }
   }
+}
+
+// Bot names — picked at random each game so the table always feels different.
+export const BOT_NAMES = ['الولا بوداااا', 'البت ليال', 'الماجيكو أبوتريكة', 'الزئبقي بركات', 'القناص متعب', 'الصخرة جمعة', 'الحاوي سليمان', 'الدليفري معلول', 'الأخطبوط شناوي', 'بيبو'];
+export function pickBotNames(n, avoid = []) {
+  const shuffle = (a) => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const fresh = shuffle(BOT_NAMES.filter((x) => !avoid.includes(x)));
+  const rest = shuffle(BOT_NAMES.filter((x) => avoid.includes(x)));
+  return fresh.concat(rest).slice(0, n);
 }

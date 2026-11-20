@@ -1,5 +1,8 @@
+import { learnHTML, LEARN } from './learn.js';
+import { pickBotNames } from './bot.js';
+import { AVATAR_IDS, avatarInner, isPlayerAvatar } from './avatars.js';
 import { Host } from './host.js';
-import { cardSVG, backSVG, CARD_INFO } from './cards.js';
+import { cardSVG, backSVG, CARD_INFO, CARD_DESC } from './cards.js';
 import { NUM_EFFECT } from './engine.js';
 import * as Net from './net.js';
 import { isLocalOnly } from './store.js';
@@ -69,7 +72,11 @@ function log(text) {
   const id = Math.random();
   ui.logs.push({ id, text });
   if (ui.logs.length > 3) ui.logs.shift();
-  setTimeout(() => { ui.logs = ui.logs.filter((l) => l.id !== id); render(); }, 3200);
+  setTimeout(() => {
+    ui.logs = ui.logs.filter((l) => l.id !== id);
+    const el = $app.querySelector(`.log [data-log="${id}"]`);
+    if (el) el.remove();
+  }, 3200);
 }
 function banner(text, ms = 1100) {
   ui.banner = text;
@@ -125,6 +132,10 @@ function lightUp(ids, cls = 'land') {
 }
 function slotsOf(view, pid) { const p = view && view.players.find((x) => x.id === pid); return p ? p.slots.map((s) => s.id) : []; }
 
+function announce(card, title, onMe = false) {
+  return FX.announce({ html: cardSVG(card), title, desc: CARD_DESC[card] || '', hot: onMe });
+}
+
 function animate(events, B, A, oldView) {
   const hand = (pid) => A['hand:' + pid] || B['hand:' + pid];
   const handB = (pid) => B['hand:' + pid] || A['hand:' + pid];
@@ -141,27 +152,51 @@ function animate(events, B, A, oldView) {
         });
         break;
       }
-      case 'drewHidden':
-        FX.enqueue(() => FX.fly(B.deck, hand(e.pid), { dur: 480 }));
-        break;
-      case 'took':
-        FX.enqueue(() => FX.fly(B.discard, hand(e.pid), { face: e.card, dur: 480 }));
-        break;
-      case 'discarded':
+      case 'drewHidden': case 'took':
+        break; // the card stays lifted over its pile until the player decides
+      case 'discarded': {
+        const src = e.from === 'discard' ? 'discard' : 'deck';
+        const from = B.held || B[src];
+        const mine = e.pid === ui.me;
+        const keptFace = mine && oldView && oldView.pending && oldView.pending.name ? oldView.pending.name : (e.from === 'discard' && ui.heldPublic ? ui.heldPublic.card : null);
         FX.enqueue(async () => {
           if (e.slotId) {
             await Promise.all([
-              FX.fly(handB(e.pid), A[e.slotId], { dur: 520 }),
-              FX.fly(B[e.slotId] || A[e.slotId], A.discard, { face: null, flipTo: e.card, dur: 620, delay: 120 }),
+              FX.fly(from, A[e.slotId], keptFace ? { face: keptFace, flipTo: 'back', dur: 750 } : { dur: 750 }),
+              FX.fly(B[e.slotId] || A[e.slotId], A.discard, { flipTo: e.card, dur: 750, delay: 60 }),
             ]);
             lightUp([e.slotId]);
           } else {
-            await FX.fly(handB(e.pid), A.discard, { face: e.card, dur: 520 });
+            await FX.fly(from, A.discard, { face: e.card, dur: 650 });
           }
+          ui.heldPublic = null;
         });
         break;
+      }
       case 'filled':
-        FX.enqueue(async () => { await FX.fly(handB(e.pid), A[e.slotId], { dur: 500 }); lightUp([e.slotId]); });
+        FX.enqueue(async () => { await FX.fly(B.held || B.deck, A[e.slotId], { dur: 650 }); lightUp([e.slotId]); });
+        break;
+      case 'peeked':
+        FX.enqueue(async () => {
+          const r0 = A[e.slotId] || B[e.slotId];
+          const to = hand(e.pid);
+          const known = e.pid === ui.me && ui.reveals[e.slotId] ? ui.reveals[e.slotId].card : null;
+          ghostSlot(e.slotId, 2500); render();
+          if (e.pid === e.owner) {
+            // looking at your own card: it lifts and turns toward you, then goes back
+            await FX.fly(r0, { left: r0.left, top: r0.top - 40, width: r0.width, height: r0.height }, known ? { face: known, dur: 450 } : { dur: 450 });
+            await FX.wait(known ? 700 : 300);
+            await FX.fly({ left: r0.left, top: r0.top - 40, width: r0.width, height: r0.height }, r0, known ? { face: known, flipTo: 'back', dur: 400 } : { dur: 400 });
+          } else {
+            await FX.fly(r0, to, known ? { face: known, dur: 550 } : { dur: 550 });
+            await FX.wait(known ? 700 : 250);
+            await FX.fly(to, r0, known ? { face: known, flipTo: 'back', dur: 500 } : { dur: 500 });
+          }
+          lightUp([e.slotId]);
+        });
+        break;
+      case 'markerOff':
+        FX.enqueue(() => FX.fly(B[e.slotId] || A[e.slotId], A.discard, { face: e.card, dur: 600 }));
         break;
       case 'snap':
         FX.enqueue(async () => {
@@ -203,8 +238,8 @@ function animate(events, B, A, oldView) {
           lightUp(ids, 'none');
         });
         break;
-      case 'plus': case 'freeze': case 'unfreeze':
-        FX.enqueue(async () => { lightUp([e.slotId]); await FX.wait(300); });
+      case 'plus': case 'freeze':
+        FX.enqueue(async () => { await FX.fly(B.discard, A[e.slotId], { face: e.card, dur: 650 }); lightUp([e.slotId]); });
         break;
       case 'cleared':
         if (e.what === 'card') FX.enqueue(() => FX.fly(B[e.slotId], A.discard, { flipTo: ui.view.discardTop, dur: 520 }));
@@ -222,7 +257,10 @@ function animate(events, B, A, oldView) {
         });
         break;
       case 'effect':
-        if (CARD_INFO[e.card] && CARD_INFO[e.card].tier === 'cmd') FX.enqueue(() => FX.popCommand(e.card));
+        if (CARD_DESC[e.card]) FX.enqueue(() => announce(e.card, `${pname(e.pid)} ${e.pid === ui.me ? 'لعبت' : 'لعب'} ${cardName(e.card)}${e.viaCopy ? ' (بـ Copy)' : ''}`));
+        break;
+      case 'targeted':
+        if (e.target !== e.by) FX.enqueue(() => announce(e.card, `${pname(e.by)} ${e.by === ui.me ? 'هتعمل' : 'هيعمل'} ${cardName(e.card)} على ${e.target === ui.me ? 'إنت' : pname(e.target)}`, e.target === ui.me));
         break;
       case 'reveal':
         for (const it of e.items) if (it.slotId) lightUp([it.slotId], 'none');
@@ -244,12 +282,19 @@ function handleEvent(e) {
     case 'reveal':
       for (const it of e.items) {
         if (it.deckTop) ui.peek = { card: it.card, until: now + e.dur };
-        else ui.reveals[it.slotId] = { card: it.card, until: now + e.dur, start: now };
+        else ui.reveals[it.slotId] = { card: it.card, until: e.dur ? now + e.dur : Infinity, start: now };
       }
-      setTimeout(render, e.dur + 30);
+      if (e.dur) setTimeout(render, e.dur + 30);
       break;
+    case 'go':
+      for (const k of Object.keys(ui.reveals)) if (ui.reveals[k].until === Infinity) ui.reveals[k].until = now;
+      banner('يلا!', 900);
+      break;
+    case 'ready': if (e.pid !== ui.me) log(`${n(e.pid)} جاهز`); break;
+    case 'peeked': log(e.pid === e.owner ? `${n(e.pid)} بص على كارت من كروته` : `${n(e.pid)} بص على كارت عند ${n(e.owner)}`); break;
+    case 'targeted': if (e.target !== e.by) log(`${n(e.by)} لعب ${cardName(e.card)} على ${n(e.target)}`); break;
     case 'discarded': if (!e.timeout) log(e.replaced ? `${n(e.pid)} بدّل ورمى ${cardName(e.card)}` : `${n(e.pid)} رمى ${cardName(e.card)}`); else log(`${n(e.pid)} خلص وقته`); break;
-    case 'took': log(`${n(e.pid)} خد ${cardName(e.card)} من الأرض`); break;
+    case 'took': log(`${n(e.pid)} خد ${cardName(e.card)} من الأرض`); ui.heldPublic = { pid: e.pid, card: e.card }; break;
     case 'snap': log(e.ok ? `${n(e.pid)} بصّر ${cardName(e.card)} ✓` : `${n(e.pid)} بصّر غلط (${cardName(e.card)}) ولبس ${cardName(e.penalty)}`); break;
     case 'banana': banner('بانانا!', 1500); log(`${n(e.pid)} قال بانانا — كل واحد ليه دور أخير`); break;
     case 'effect': if (CARD_INFO[e.card].tier === 'cmd') log(`${n(e.pid)} شغّل ${cardName(e.card)}${e.viaCopy ? ' (Copy)' : ''}`); break;
@@ -261,7 +306,12 @@ function handleEvent(e) {
     case 'freeze': log(`خانة عند ${n(e.owner)} اتجمدت`); break;
     case 'unfreeze': log(`التجميد خلص عند ${n(e.owner)}`); break;
     case 'guardUsed': log(e.ok ? `${n(e.pid)} استخدم Guard وشال ${e.what === 'plus' ? '+5' : 'التجميد'}` : `${n(e.pid)} كشف كارت غلط ولبس ${cardName(e.penalty || 'n0')}`); break;
-    case 'guarded': log(e.ok ? `${n(e.pid)} صدّ ${cardName(e.card)} بـ Guard!` : `${n(e.pid)} كشف كارت غلط ولبس كارت`); break;
+    case 'guarded':
+      if (e.self) {
+        log(e.ok ? `${n(e.pid)} رفض ${cardName(e.card)} بـ Guard` : `${n(e.pid)} كشف كارت غلط ولبس كارت — و${cardName(e.card)} هيتنفذ`);
+        if (e.ok) FX.enqueue(() => announce('guard', `${n(e.pid)} رفض ${cardName(e.card)} بالـ Guard`));
+      } else log(e.ok ? `${n(e.pid)} صدّ ${cardName(e.card)} بـ Guard!` : `${n(e.pid)} كشف كارت غلط ولبس كارت`);
+      break;
     case 'skipped': log(`${n(e.pid)} فوّت دوره`); break;
     case 'willSkip': log(`${n(e.pid)} هيفوّت دوره الجاي`); break;
     case 'delegated': if (e.owner !== e.exec) log(`${n(e.exec)} هينفذ بدل ${n(e.owner)}`); break;
@@ -288,9 +338,10 @@ function startBots() {
   const s = ui.setup;
   LS.set('setup', s);
   const n = s.mode === 'team' ? 4 : s.count;
-  const botNames = ['موزو', 'بنبون', 'موزيكا'];
-  const players = [{ id: 'me', name: ui.name || 'أنا' }];
-  for (let i = 1; i < n; i++) players.push({ id: 'b' + i, name: botNames[i - 1] + ' 🤖', bot: s.level });
+  const botNames = pickBotNames(n - 1, LS.get('lastBots') || []);
+  LS.set('lastBots', botNames);
+  const players = [{ id: 'me', name: ui.name || 'أنا', av: myAvatar() }];
+  for (let i = 1; i < n; i++) players.push({ id: 'b' + i, name: botNames[i - 1], bot: s.level, av: 'bot' + (i - 1) });
   const host = new Host({ mode: s.mode, players, timed: s.timed, botDelay: /fast/.test(location.search) ? 40 : 900 });
   ui.me = 'me';
   ui.conn = { act: (a) => host.act('me', a), leave: () => host.destroy(), isHost: true, host, local: true };
@@ -313,6 +364,7 @@ function render() {
   if (ui.screen === 'online') return renderOnline();
   if (ui.screen === 'lobby') return renderLobby();
   if (ui.screen === 'rules') return renderRules();
+  if (ui.screen === 'cards') return renderCards();
   if (ui.screen === 'game') return renderGame();
 }
 
@@ -338,13 +390,21 @@ function screen(inner) {
 }
 const backBtn = (to) => `<button class="round" data-go="${to}" aria-label="رجوع" style="align-self:flex-start">${ICON.back}</button>`;
 
+function avatarSheet() {
+  const cur = myAvatar();
+  return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>اختار صورتك</h2>
+    <div class="av-grid">${AVATAR_IDS.map((id) => `<button class="avatar av-opt ${id === cur ? 'on' : ''}" data-av="${id}" aria-label="صورة ${id.slice(1)}">${avatarInner(id)}</button>`).join('')}</div>
+    <button class="plank cream" data-close="1" style="width:100%;margin-top:12px">رجوع</button></div></div>`;
+}
+
 function renderHome() {
   $app.innerHTML = screen(`
     <img class="logo" src="cards/logo.webp" alt="بانانا">
-    <div class="field"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div>
+    <div class="me-row"><button class="avatar pick-av" data-sheet="avatar" aria-label="غيّر صورتك">${avatarInner(myAvatar())}<i class="pen">✎</i></button>
+    <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ''}
     <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
     <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
-    <div class="icons-row"><button class="round" data-go="rules" aria-label="الكروت والقواعد">${ICON.book}</button></div>`);
+    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>`);
 }
 
 function renderBotSetup() {
@@ -362,14 +422,18 @@ function renderBotSetup() {
 }
 
 function renderRules() {
+  const i = Math.min(ui.learnPage || 0, LEARN.length - 1);
+  $app.innerHTML = screen(`
+    <div style="display:flex;justify-content:space-between;align-items:center;width:100%">${backBtn('home')}<button class="mini-btn" data-go="cards">كل الكروت</button></div>
+    ${learnHTML(i)}`);
+  LS.set('learned', 1);
+}
+
+function renderCards() {
   const names = Object.keys(CARD_INFO);
   $app.innerHTML = screen(`
-    ${backBtn('home')}
-    <div class="board">
-      <p><b>الهدف:</b> أقل مجموع كروت في آخر كل جولة. ٥ جولات، الرابعة سكورها × ٢، والخامسة عمياني.</p>
-      <p style="margin:0"><b>في دورك:</b> اسحب من الكومة، أو خد آخر كارت من الأرض (مش أمر)، أو بصّر كارت زي اللي على الأرض. تأثير الكارت بيشتغل بس لو سحبته ورميته في نفس الدور. أي أمر قيمته ١٠.</p>
-    </div>
-    <div class="glossary">${names.map((n) => `<div>${cardSVG(n)}</div>`).join('')}</div>`);
+    ${backBtn('rules')}
+    <div class="glossary big">${names.map((n) => `<div class="gl">${cardSVG(n)}<p>${CARD_DESC[n] || ({ minus: 'سالب ١ — أحلى كارت' }[n] || 'رقم عادي')}</p></div>`).join('')}</div>`);
 }
 
 function renderOnline() {
@@ -388,11 +452,13 @@ function renderOnline() {
     ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}`);
 }
 
-function avatarHTML(pid, opts = {}) {
+function myAvatar() { const a = LS.get('avatar'); return isPlayerAvatar(a) ? a : 'p1'; }
+
+function avatarHTML(pid, opts = {}, av = null) {
   const cls = ['avatar'];
   if (opts.active) cls.push('active');
   if (opts.small) cls.push('small');
-  return `<div class="${cls.join(' ')}">${BANANA_FACE}${opts.ring ? `<i class="ring" id="ring-${pid}"></i>` : ''}</div>`;
+  return `<div class="${cls.join(' ')}">${(av && avatarInner(av)) || BANANA_FACE}${opts.ring ? `<i class="ring" id="ring-${pid}"></i>` : ''}</div>`;
 }
 
 function renderLobby() {
@@ -408,7 +474,7 @@ function renderLobby() {
     if (!p) {
       list.push(`<div class="seat-row empty"><div class="avatar" style="opacity:.4"></div><span class="nm">مكان فاضي</span>${team ? `<span class="ribbon">${team}</span>` : ''}${isHost ? `<button class="mini-btn" data-lobby="bot" data-i="${i}">+ روبوت</button>` : ''}</div>`);
     } else {
-      list.push(`<div class="seat-row">${avatarHTML('l' + i)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn" style="background:var(--pink)" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
+      list.push(`<div class="seat-row">${avatarHTML('l' + i, {}, p.av)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn" style="background:var(--pink)" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
     }
   }
   const full = L.seats.slice(0, max).filter(Boolean).length === max;
@@ -447,8 +513,8 @@ function slotHTML(s, owner, opts = {}) {
   const face = s.has ? (showing ? cardSVG(rv.card) : backSVG()) : '';
   return `<div class="${cls.join(' ')}" data-slot="${s.id}" data-owner="${owner}" ${opts.pickable ? 'role="button" tabindex="0"' : ''}>
     ${face}
-    ${s.plus ? `<span class="badge plus-b">+${5 * s.plus}</span>` : ''}
-    ${s.frozen ? `<span class="badge freeze-b">❄ ${s.frozen}</span>` : ''}
+    ${(s.markers || []).map((m, i) => `<span class="mk" style="--i:${i}">${cardSVG(m)}</span>`).join('')}
+    ${s.freezeCard ? `<span class="mk fz">${cardSVG(s.freezeCard)}<b>${s.frozen}</b></span>` : ''}
     ${s.locked ? '<span class="badge freeze-b">مقفول</span>' : ''}
     ${opts.pos ? `<span class="pos">${opts.pos}</span>` : ''}
   </div>`;
@@ -460,7 +526,7 @@ function pickableSlots() {
   if (!p) return set;
   const mine = meP().slots;
   const add = (ids) => ids.forEach((i) => set.add(i));
-  if (sel.mode === 'snap' || sel.mode === 'guard' || sel.mode === 'gr2') add(mine.filter((s) => s.has && !s.frozen && !s.locked).map((s) => s.id));
+  if (sel.mode === 'snap' || sel.mode === 'guard' || sel.mode === 'gr2' || sel.mode === 'selfg') add(mine.filter((s) => s.has && !s.frozen && !s.locked).map((s) => s.id));
   else if (p.kind === 'hold' || (p.kind === 'extra' && sel.extraIdx != null)) add(mine.filter((s) => !s.frozen && !s.locked).map((s) => s.id));
   else if (p.kind === 'target') {
     const sp = p.spec;
@@ -498,14 +564,17 @@ function statusText() {
       case 'delegate': return 'الفريق بيختار مين ينفذ';
       case 'target': return `${who} بيختار…`;
       case 'roundOver': return 'مستنيين الجولة الجاية';
+      case 'ready': return `مستنيين: ${v.waitingOn.map((q) => esc(pname(q))).join('، ')}`;
       default: return `${who} بيلعب…`;
     }
   }
   const sel = ui.sel;
   if (sel.mode === 'snap') return 'اضغط على الكارت اللي هتبصّره';
   if (sel.mode === 'guard') return 'اضغط على كارت الـ Guard بتاعك';
+  if (sel.mode === 'selfg') return 'اضغط على كارت الـ Guard بتاعك عشان تلغي الأمر — لو طلع غلط هتاخد كارت والأمر هيتنفذ';
   if (sel.mode === 'gr2') return 'اضغط على كارت الـ Guard بتاعك — لو طلع غلط هتلبس آخر كارت على الأرض';
   switch (p.kind) {
+    case 'ready': return p.answered ? `مستنيين: ${v.waitingOn.map((q) => esc(pname(q))).join('، ')}` : '<b>بُص على أول كارتين عندك واحفظهم!</b><br>اللعب هيبدأ لما الكل يدوس جاهز';
     case 'turn': return '<b>دورك!</b> اسحب، أو خد من الأرض، أو بصّر';
     case 'hold': return p.from === 'deck' ? 'بدّله بكارت من كروتك، أو ارميه' : 'اختار الكارت اللي هتبدّله';
     case 'extra': return sel.extraIdx == null ? 'Extra: اختار كارت من الاتنين' : 'اضغط على كارت تبدّله، أو ارمي';
@@ -542,7 +611,7 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: isMe ? i + 1 : 0 })).join('');
   const name = isMe ? 'إنت' : esc(o.name);
   return `<div class="${cls.join(' ')}" data-player="${o.id}">
-    <div class="who">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe })}<span class="ribbon">${name} · ${o.total}</span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
+    <div class="who">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av)}<span class="ribbon nmr"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
     <div class="hand" data-hand="${o.id}">${slots || '<span class="ribbon">مفيش كروت</span>'}</div>
   </div>`;
 }
@@ -566,6 +635,14 @@ function renderGame() {
   const canDraw = p && p.kind === 'turn';
   const typeChip = v.tiebreak ? 'فاصلة' : v.roundType === 'double' ? '×2' : v.roundType === 'blind' ? 'عمياني' : '';
   const deck = v.deckCount ? `<span class="stack">${backSVG()}</span><span class="stack">${backSVG()}</span><span class="stack">${backSVG()}</span>` : '';
+  let heldDeck = '', heldFloor = '';
+  if (v.holding && !(v.holding.pid === ui.me && p && p.kind === 'extra')) {
+    const mine = v.holding.pid === ui.me;
+    const fromFloor = v.holding.from === 'discard';
+    const face = mine && p && p.kind === 'hold' ? p.name : fromFloor && ui.heldPublic ? ui.heldPublic.card : null;
+    const el = `<div class="held ${mine ? 'mine' : ''}" data-pile="held">${face ? cardSVG(face) : backSVG()}${v.holding.n > 1 ? `<span class="ribbon">×${v.holding.n}</span>` : ''}</div>`;
+    if (fromFloor) heldFloor = el; else heldDeck = el;
+  }
 
   $app.innerHTML = `<div class="game">
   <div class="topbar">
@@ -581,18 +658,18 @@ function renderGame() {
     ${seats.join('')}
     <div class="center">
       <div class="piles">
-        <div class="pile ${canDraw ? 'pickable' : ''}" data-pile="deck" ${canDraw ? 'role="button" tabindex="0" aria-label="اسحب"' : ''}>${deck}<span class="ribbon lbl">الكومة ${v.deckCount}</span></div>
-        <div class="pile ${top ? '' : 'none'} ${canTake ? 'pickable' : ''}" data-pile="discard" ${canTake ? 'role="button" tabindex="0" aria-label="خد من الأرض"' : ''}>${top ? cardSVG(top) : ''}<span class="ribbon lbl">الأرض</span></div>
+        <div class="pile ${canDraw ? 'pickable' : ''}" data-pile="deck" ${canDraw ? 'role="button" tabindex="0" aria-label="اسحب"' : ''}>${deck}${heldDeck}<span class="ribbon lbl">الكومة ${v.deckCount}</span></div>
+        <div class="pile ${top ? '' : 'none'} ${canTake ? 'pickable' : ''}" data-pile="discard" ${canTake ? 'role="button" tabindex="0" aria-label="خد من الأرض"' : ''}>${top ? cardSVG(top) : ''}${heldFloor}<span class="ribbon lbl">الأرض</span></div>
       </div>
       <div class="status" aria-live="polite">${statusText() || '&nbsp;'}</div>
-      <div class="log">${ui.logs.map((l) => `<div>${esc(l.text)}</div>`).join('')}</div>
+      <div class="log">${ui.logs.map((l) => `<div data-log="${l.id}">${esc(l.text)}</div>`).join('')}</div>
     </div>
   </div>
   ${v.deadline && v.timed && v.waitingOn.includes(ui.me) ? '<div class="timer-line" id="timer"><i></i></div>' : ''}
   <div class="actions">${actionsHTML()}</div>
   ${ui.peek && ui.peek.until > Date.now() ? `<div class="peek-toast">${cardSVG(ui.peek.card)}</div>` : ''}
   ${ui.banner ? `<div class="banner"><span class="ink-text">${ui.banner}</span></div>` : ''}
-  ${sheetHTML()}
+  ${boardOrSheet()}
   </div>`;
   startTimerBar();
 }
@@ -602,6 +679,8 @@ function actionsHTML() {
   if (!p) return '';
   const snapBtn = (label = 'بصّر') => `<button class="plank teal ${sel.mode === 'snap' ? 'on' : ''}" data-ui="snap-mode" ${v.discardTop ? '' : 'disabled'}>${label}</button>`;
   switch (p.kind) {
+    case 'ready':
+      return p.answered ? '' : '<button class="plank gold banana-btn" data-a="ready">حفظتهم — جاهز</button>';
     case 'turn': {
       const canBanana = v.mode === 'solo' && !v.banana && me.turnsPlayed >= 3;
       const top = v.discardTop;
@@ -612,7 +691,7 @@ function actionsHTML() {
         ${v.mode === 'solo' ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : `بانانا بعد ${3 - me.turnsPlayed} أدوار`}</button>` : ''}`;
     }
     case 'hold':
-      return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>` : '';
+      return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
     case 'extra':
       return `${sel.extraIdx != null ? `<button class="plank wood" data-ui="extra-throw">ارمي${effectNote(p.cards[sel.extraIdx].name)}</button>` : ''}
         ${p.snapsLeft > 0 ? snapBtn() : ''}`;
@@ -637,6 +716,12 @@ function effectNote(name) {
   return '';
 }
 
+function boardOrSheet() {
+  const h = sheetHTML();
+  if (!h.includes('woodboard')) ui.boardShown = null;
+  return h;
+}
+
 function sheetHTML() {
   const v = ui.view, p = v.pending;
   if (ui.sheet === 'scores') return scoresSheet();
@@ -644,10 +729,14 @@ function sheetHTML() {
     return `<div class="sheet-bg" data-close="1"><div class="sheet">
       <h2>القائمة</h2>
       <div class="opts">
+        <button class="opt" data-sheet="learn"><b>ازاي ألعب؟</b><span>شرح بسيط للعبة خطوة بخطوة</span></button>
         <button class="opt" data-sheet="rules-mini"><b>الكروت</b><span>شوف كل كارت بيعمل إيه</span></button>
         <button class="opt" data-ui="leave"><b>اخرج من الجيم</b><span>${ui.conn && ui.conn.local ? 'الجيم هيتقفل' : 'روبوت هيلعب مكانك'}</span></button>
         <button class="plank cream" data-close="1">رجوع</button>
       </div></div></div>`;
+  }
+  if (ui.sheet === 'learn') {
+    return `<div class="sheet-bg" data-close="1"><div class="sheet">${learnHTML(Math.min(ui.learnPage || 0, LEARN.length - 1), { inGame: true })}</div></div>`;
   }
   if (ui.sheet === 'rules-mini') {
     return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>الكروت</h2><div class="glossary">${Object.keys(CARD_INFO).map((n) => `<div>${cardSVG(n)}</div>`).join('')}</div><button class="plank cream" data-close="1" style="width:100%;margin-top:10px">رجوع</button></div></div>`;
@@ -665,18 +754,17 @@ function sheetHTML() {
     }
     return `<div class="sheet-bg"><div class="sheet"><h2>استخدم Guard</h2><p>ده هيبقى دورك كله. بعدها هتضغط على كارت الـ Guard بتاعك، ولو طلع مش Guard هتلبس آخر كارت على الأرض.</p><div class="opts">${opts.join('')}<button class="plank cream" data-ui="gr1">رجوع</button></div></div></div>`;
   }
-  if (p.kind === 'hold') {
-    return `<div class="hold-show"><div class="float-card">${cardSVG(p.name)}</div></div>`;
-  }
+  if (p.kind === 'hold') return '';
   if (p.kind === 'extra') {
     return `<div class="hold-show">${p.cards.map((c, i) => `<div class="float-card small ${ui.sel.extraIdx === i ? 'sel' : ''}" data-extra="${i}" role="button" tabindex="0">${cardSVG(c.name)}</div>`).join('')}</div>`;
   }
   if (p.kind === 'guard' && ui.sel.mode !== 'guard') {
     return `<div class="sheet-bg"><div class="sheet">
-      <h2>${esc(pname(p.by))} لعب عليك ${cardName(p.card)}</h2>
-      <p>معاك Guard؟ لو كشفت كارت غلط هتلبس كارت زيادة والأمر هيتنفذ.</p>
-      <div class="float-wrap"><div class="float-card small">${cardSVG(p.card)}</div></div>
-      <div class="row"><button class="plank cream" data-a="noGuard">لأ، كمّل</button><button class="plank" style="background:var(--pink);color:#fff;box-shadow:0 6px 0 var(--ink)" data-ui="guard-mode">آه، هكشف الـ Guard</button></div>
+      <h2>${esc(pname(p.by))} هيعمل عليك ${cardName(p.card)}</h2>
+      <div class="float-wrap"><div class="float-card">${cardSVG(p.card)}</div></div>
+      <p><b>الكارت ده بيعمل إيه:</b> ${esc(CARD_DESC[p.card] || '')}</p>
+      <p>تقدر تمنعه لو معاك <b>Guard</b> في كروتك: دوس "آه" وبعدين اضغط على كارت الـ Guard. لو كشفت كارت غلط هتلبس كارت زيادة والأمر هيتنفذ برضه.</p>
+      <div class="row"><button class="plank cream" data-a="noGuard">مش معايا — كمّل</button><button class="plank" style="background:var(--pink);color:#fff;box-shadow:0 6px 0 var(--ink)" data-ui="guard-mode">معايا Guard</button></div>
     </div></div>`;
   }
   if (p.kind === 'delegate') {
@@ -706,22 +794,30 @@ function sheetHTML() {
   return '';
 }
 
+const RN = ['١', '٢', '٣', '٤', '٥'];
+
+function boardWrap(title, body, { close = false, sub = '' } = {}) {
+  const fresh = ui.boardShown !== title;
+  ui.boardShown = title;
+  return `<div class="sheet-bg wbg" ${close ? 'data-close="1"' : ''}><div class="woodboard ${fresh ? 'pop' : ''}">
+    ${leafSVG('wb-leaf', 'left:-60px;top:-50px;transform:rotate(25deg) scale(.55)')}${leafSVG('wb-leaf', 'right:-60px;top:-55px;transform:scaleX(-1) rotate(25deg) scale(.55)')}
+    <div class="wb-title">${title}</div>${sub ? `<div class="wb-sub">${sub}</div>` : ''}
+    <div class="wb-body">${body}</div></div></div>`;
+}
+
+function teamTag(v, p) { return v.mode === 'team' ? `<span class="ribbon ${p.team === 0 ? 'sky' : 'pink'}">${p.team === 0 ? 'فريق أ' : 'فريق ب'}</span>` : ''; }
+
 function scoresSheet() {
   const v = ui.view;
-  const rows = v.mode === 'team'
-    ? [0, 1].map((t) => {
-      const ps = v.players.filter((p) => p.team === t);
-      return `<tr><td>${ps.map((p) => esc(p.name)).join(' + ')}</td>${[0, 1, 2, 3, 4].map((r) => `<td>${ps[0].roundScores[r] ?? ''}</td>`).join('')}<td><b>${ps[0].total}</b></td></tr>`;
-    }).join('')
-    : v.players.map((p) => `<tr><td>${esc(p.name)}</td>${[0, 1, 2, 3, 4].map((r) => `<td>${p.roundScores[r] ?? ''}</td>`).join('')}<td><b>${p.total}</b></td></tr>`).join('');
-  return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>السكور</h2>
-    <table class="scores"><tr><th></th><th>١</th><th>٢</th><th>٣</th><th>٤×٢</th><th>٥</th><th>المجموع</th></tr>${rows}</table>
-    <p class="hint">الأقل هو الأحسن.</p>
-    <button class="plank cream" data-close="1" style="width:100%">رجوع</button></div></div>`;
+  const head = `<tr><th></th>${RN.map((r, i) => `<th>${r}${i === 3 ? '<small>×٢</small>' : ''}</th>`).join('')}<th>المجموع</th></tr>`;
+  const rows = v.players.map((p) => `<tr><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span></div></td>${[0, 1, 2, 3, 4].map((r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
+  return boardWrap('السكور', `<div class="parch"><table class="wb-table">${head}${rows}</table></div>
+    <p class="wb-hint">الأقل نقط هو الأحسن 🍌</p>
+    <button class="plank cream" data-close="1">رجوع</button>`, { close: true });
 }
 
 function miniHand(slots) {
-  return `<div class="mini-hand">${slots.map((s) => `<div class="m">${s.card ? cardSVG(s.card) : ''}${s.plus ? `<small>+${5 * s.plus}</small>` : ''}</div>`).join('')}</div>`;
+  return `<div class="mini-hand">${slots.map((s) => `<div class="m ${s.frozen ? 'fz' : ''}">${s.card ? cardSVG(s.card) : ''}${s.plus ? `<small>+${5 * s.plus}</small>` : ''}</div>`).join('')}</div>`;
 }
 
 function roundSheet() {
@@ -729,30 +825,44 @@ function roundSheet() {
   const isHost = v.pending && v.pending.kind === 'roundOver';
   const rows = e.detail.map((d, i) => {
     const p = v.players.find((x) => x.id === d.pid);
-    const unitIdx = v.mode === 'team' ? p.team : i;
-    return `<tr class="${e.wins[unitIdx] ? 'win' : ''}"><td>${esc(p.name)}${miniHand(d.slots)}</td><td>${d.sum}</td><td>${e.scores[unitIdx]}</td><td>${p.total}</td></tr>`;
+    const u = v.mode === 'team' ? p.team : i;
+    const win = e.wins[u];
+    return `<div class="rs-row ${win ? 'win' : ''}">
+      <div class="rs-top">${avatarHTML(p.id, {}, p.av)}${win ? '<span class="crown">👑</span>' : ''}
+        <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}</div>
+        <div class="rs-nums"><span class="chip">كروته <b>${d.sum}</b></span><span class="chip ${win ? 'gold' : ''}">${win ? 'كسب الجولة' : 'السكور'} <b>${e.scores[u]}</b></span><span class="chip dark">المجموع <b>${p.total}</b></span></div>
+      </div>
+      ${miniHand(d.slots)}
+    </div>`;
   }).join('');
-  return `<div class="sheet-bg"><div class="sheet">
-    <h2>${e.tiebreak ? 'الجولة الفاصلة' : `آخر الجولة ${e.round}`}${e.mult === 2 ? ' (× ٢)' : ''}</h2>
-    <table class="scores"><tr><th>اللاعب</th><th>كروته</th><th>السكور</th><th>المجموع</th></tr>${rows}</table>
-    ${v.mode === 'team' ? '<p class="hint">سكور الفريق = مجموع الشريكين.</p>' : ''}
-    ${isHost ? '<button class="plank gold" data-a="next" style="width:100%">الجولة الجاية</button>' : '<p class="hint">مستنيين صاحب الأوضة يبدأ الجولة الجاية.</p>'}
-  </div></div>`;
+  const title = e.tiebreak ? 'الجولة الفاصلة' : `آخر الجولة ${RN[e.round - 1] || e.round}`;
+  const sub = [e.mult === 2 ? 'الجولة دي النقط فيها × ٢' : '', v.mode === 'team' ? 'سكور الفريق = مجموع كروت الشريكين' : '', 'اللي كسب الجولة بياخد صفر'].filter(Boolean).join(' · ');
+  return boardWrap(title, `<div class="rs-list">${rows}</div>
+    ${isHost ? '<button class="plank gold" data-a="next">الجولة الجاية</button>' : '<p class="wb-hint">مستنيين صاحب الأوضة يبدأ الجولة الجاية…</p>'}`, { sub });
 }
 
 function gameOverSheet() {
   const v = ui.view;
   const winners = v.winners || (ui.gameOver && ui.gameOver.winners) || [];
   const iWon = winners.includes(ui.me);
-  const e = ui.lastRoundEnd;
-  return `<div class="sheet-bg"><div class="sheet">
-    <h2>${iWon ? 'كسبت! 🍌' : `الكسبان: ${winners.map((w) => esc(pname(w))).join(' و')}`}</h2>
-    ${e ? `<table class="scores"><tr><th>اللاعب</th><th>آخر جولة</th><th>المجموع</th></tr>${v.players.map((p) => `<tr class="${winners.includes(p.id) ? 'win' : ''}"><td>${esc(p.name)}</td><td>${p.roundScores[p.roundScores.length - 1] ?? ''}</td><td>${p.total}</td></tr>`).join('')}</table>` : ''}
+  const ranked = v.players.slice().sort((a, b) => a.total - b.total);
+  const medal = ['🥇', '🥈', '🥉', '4'];
+  let rank = 0;
+  const rows = ranked.map((p, k) => {
+    if (k > 0 && p.total !== ranked[k - 1].total) rank = k;
+    const w = winners.includes(p.id);
+    return `<div class="go-row ${w ? 'win' : ''}"><span class="medal">${medal[rank]}</span>${avatarHTML(p.id, {}, p.av)}
+      <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}<div class="go-rounds">${p.roundScores.map((x, r) => `<i title="الجولة ${r + 1}">${x}</i>`).join('')}</div></div>
+      <span class="chip ${w ? 'gold' : 'dark'}"><b>${p.total}</b></span></div>`;
+  }).join('');
+  const champ = winners.map((w) => esc(w === ui.me ? 'إنت' : pname(w))).join(' و');
+  return boardWrap(iWon ? 'كسبت! 🍌👑' : 'خلصت اللعبة!', `
+    <div class="go-champ">${winners.slice(0, 2).map((w) => { const p = v.players.find((x) => x.id === w); return p ? avatarHTML(p.id, {}, p.av) : ''; }).join('')}<div>بطل البنانا: <b>${champ}</b></div></div>
+    <div class="go-list">${rows}</div>
     <div class="row">
       ${ui.conn && ui.conn.local ? '<button class="plank gold" data-ui="again">العب تاني</button>' : ''}
       <button class="plank cream" data-ui="leave">الرئيسية</button>
-    </div>
-  </div></div>`;
+    </div>`);
 }
 
 let timerRAF = null;
@@ -783,6 +893,7 @@ function onSlotTap(slotId, owner) {
   if (!pick.has(slotId)) return;
   if (sel.mode === 'snap') { send({ t: 'snap', slotId }); ui.sel = {}; return; }
   if (sel.mode === 'guard') { send({ t: 'guard', slotId }); ui.sel = {}; return; }
+  if (sel.mode === 'selfg') { ui.sel = {}; return send({ t: 'throwGuard', slotId }); }
   if (sel.mode === 'gr2') { send({ t: 'guardRemove', guardSlot: slotId, targetSlot: sel.target, what: sel.what }); ui.sel = {}; return; }
   if (p.kind === 'hold') return send({ t: 'keep', slotId });
   if (p.kind === 'extra') { const i = sel.extraIdx; ui.sel = {}; return send({ t: 'keep', i, slotId }); }
@@ -809,13 +920,15 @@ function onSlotTap(slotId, owner) {
 }
 
 $app.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
+  const t = ev.target.closest('[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
   if (!t) return;
   const d = t.dataset;
   const nm = document.getElementById('nm');
   if (nm) { ui.name = nm.value.trim().slice(0, 14); LS.set('name', ui.name); }
   if (d.close && ev.target === t) { ui.sheet = null; return render(); }
   if (d.close) { if (t.tagName === 'BUTTON') { ui.sheet = null; render(); } return; }
+  if (d.lp != null) { ui.learnPage = +d.lp; return render(); }
+  if (d.go === 'rules') ui.learnPage = 0;
   if (d.go) { ui.error = ''; ui.screen = d.go; return render(); }
   if (d.seg) {
     const val = JSON.parse(d.val);
@@ -830,13 +943,15 @@ $app.addEventListener('click', (ev) => {
     return Net.joinRoom(netCtx(), code);
   }
   if (d.lobby) return ui.lobby && ui.lobby.handle(d.lobby, +d.i);
-  if (d.sheet) { ui.sheet = d.sheet; return render(); }
+  if (d.av) { LS.set('avatar', d.av); ui.sheet = null; return render(); }
+  if (d.sheet) { if (d.sheet === 'learn') ui.learnPage = 0; ui.sheet = d.sheet; return render(); }
   if (d.a) {
     if (d.a === 'next') ui.lastRoundEnd = null;
     return send({ t: d.a });
   }
   if (d.ui === 'snap-mode') { ui.sel = ui.sel.mode === 'snap' ? {} : { ...ui.sel, mode: 'snap' }; return render(); }
   if (d.ui === 'guard-mode') { ui.sel = { mode: 'guard' }; return render(); }
+  if (d.ui === 'selfg') { ui.sel = ui.sel.mode === 'selfg' ? {} : { mode: 'selfg' }; return render(); }
   if (d.ui === 'gr1') { ui.sel = ui.sel.mode === 'gr1' ? {} : { mode: 'gr1' }; return render(); }
   if (d.gr) { const [target, what] = d.gr.split('|'); ui.sel = { mode: 'gr2', target, what }; return render(); }
   if (d.ui === 'extra-throw') { const i = ui.sel.extraIdx; ui.sel = {}; return send({ t: 'throw', i }); }
@@ -863,6 +978,7 @@ $app.addEventListener('keydown', (ev) => {
 function netCtx() {
   return {
     name: () => ui.name || 'لاعب',
+    avatar: () => myAvatar(),
     setup: () => ui.setup,
     showLobby(lobby) { ui.lobby = lobby; ui.screen = 'lobby'; ui.error = ''; render(); },
     lobbyChanged() { if (ui.screen === 'lobby') render(); },

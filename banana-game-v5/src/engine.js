@@ -153,7 +153,7 @@ export function createGame({ mode, players, seed = Date.now() }) {
     v: 1, mode, rng: seed | 0, seq: 0, slotSeq: 0, events: [],
     cards: {}, deck: [], discard: [], limbo: [],
     players: players.map((pl, i) => ({
-      id: pl.id, name: pl.name, bot: pl.bot || null, team: mode === 'team' ? i % 2 : i,
+      id: pl.id, name: pl.name, av: pl.av || null, bot: pl.bot || null, team: mode === 'team' ? i % 2 : i,
       slots: [], turnsPlayed: 0, skipNext: false, total: 0, roundScores: [],
     })),
     round: 0, tiebreak: 0, startIdx: -1, current: null,
@@ -194,13 +194,21 @@ function startRound(state) {
   if (!blind) state.discard.push(state.deck.pop());
   state.startIdx = state.startIdx < 0 ? rint(state, state.players.length) : (state.startIdx + 1) % state.players.length;
   emit(state, { type: 'roundStart', to: 'all', round: state.round, kind: roundType(state), tiebreak: state.tiebreak });
+  state.current = null;
   if (!blind) {
     for (const p of state.players) {
       // slots[0] is the right-most card on the player's screen (RTL row).
-      reveal(state, [p.id], p.slots.slice(0, 2).map((s) => ({ p, s })));
+      // dur 0 = stays face up until everyone is ready.
+      reveal(state, [p.id], p.slots.slice(0, 2).map((s) => ({ p, s })), 0);
     }
+    setPending(state, { kind: 'ready', pids: state.players.map((p) => p.id), answers: {} });
+    return;
   }
-  state.current = null;
+  beginTurn(state, state.players[state.startIdx]);
+}
+
+function startPlay(state) {
+  emit(state, { type: 'go', to: 'all' });
   beginTurn(state, state.players[state.startIdx]);
 }
 
@@ -270,6 +278,7 @@ const TASKS = {
         if (s.freeze && state.turnCtx.frozenAtStart.includes(s.id)) {
           s.freeze.left--;
           if (s.freeze.left <= 0) {
+            emit(state, { type: 'markerOff', to: 'all', slotId: s.id, card: nameOf(state, s.freeze.card) });
             state.discard.push(s.freeze.card);
             s.freeze = null;
             emit(state, { type: 'unfreeze', to: 'all', slotId: s.id, owner: p.id });
@@ -330,6 +339,10 @@ const TASKS = {
 
     guardCheck(state, t) {
       const target = player(state, t.target);
+      if (!t.announced) {
+        t.announced = true;
+        emit(state, { type: 'targeted', to: 'all', by: t.exec, target: t.target, card: t.card, slotId: t.then && (t.then.slotId || t.then.theirs) || t.observeSlot || null });
+      }
       if (t.target === t.exec || hasNoCards(target)) { schedule(state, t.then); return; }
       setPending(state, { kind: 'guard', pid: t.target, card: t.card, by: t.exec, task: t });
     },
@@ -340,7 +353,10 @@ const TASKS = {
     observeReveal(state, t) {
       for (const it of t.picks) {
         const f = findSlot(state, it.slotId);
-        if (f && touchable(f.s)) reveal(state, [t.exec], [f]);
+        if (f && touchable(f.s)) {
+          emit(state, { type: 'peeked', to: 'all', pid: t.exec, owner: f.p.id, slotId: f.s.id });
+          reveal(state, [t.exec], [f]);
+        }
       }
       state.lastActivated = 'choose';
     },
@@ -403,6 +419,7 @@ function execEffect(state, t) {
       return;
     // ----- commands
     case 'golden':
+      for (const s of me.slots.filter(touchable)) emit(state, { type: 'peeked', to: 'all', pid: exec, owner: exec, slotId: s.id });
       reveal(state, [exec], me.slots.filter(touchable).map((s) => ({ p: me, s })), GOLDEN_MS);
       return done(state, t);
     case 'buzz': {
@@ -509,7 +526,7 @@ const APPLY = {
     if (!f || !touchable(f.s)) return;
     takeFromDiscard(state, t.trigger);
     f.s.plus++; f.s.plusCards.push(t.trigger);
-    emit(state, { type: 'plus', to: 'all', slotId: f.s.id, owner: f.p.id });
+    emit(state, { type: 'plus', to: 'all', slotId: f.s.id, owner: f.p.id, card: nameOf(state, t.trigger) });
     done(state, { name: 'plus' });
   },
   freeze(state, t) {
@@ -517,7 +534,7 @@ const APPLY = {
     if (!f || !touchable(f.s)) return;
     takeFromDiscard(state, t.trigger);
     f.s.freeze = { card: t.trigger, left: 3 };
-    emit(state, { type: 'freeze', to: 'all', slotId: f.s.id, owner: f.p.id });
+    emit(state, { type: 'freeze', to: 'all', slotId: f.s.id, owner: f.p.id, card: nameOf(state, t.trigger) });
     done(state, { name: 'freeze' });
   },
   swap(state, t) {
@@ -567,7 +584,9 @@ function resolveTarget(state, pend, a) {
     }
     case 'peekOwn': case 'peekOther': {
       if (!spec.options.includes(a.slotId)) fail('bad slot');
-      reveal(state, [exec], [findSlot(state, a.slotId)]);
+      const f = findSlot(state, a.slotId);
+      emit(state, { type: 'peeked', to: 'all', pid: exec, owner: f.p.id, slotId: a.slotId });
+      reveal(state, [exec], [f]);
       return;
     }
     case 'buzz': {
@@ -583,10 +602,12 @@ function resolveTarget(state, pend, a) {
         reveal(state, 'all', [f]);
         state.discard.push(removeCardFromSlot(f.p, f.s));
       } else if (a.what === 'plus') {
+        emit(state, { type: 'markerOff', to: 'all', slotId: f.s.id, card: nameOf(state, f.s.plusCards[f.s.plusCards.length - 1]) });
         state.discard.push(f.s.plusCards.pop());
         f.s.plus--;
         if (f.s.plus === 0 && !f.s.card) f.p.slots.splice(f.p.slots.indexOf(f.s), 1);
       } else {
+        emit(state, { type: 'markerOff', to: 'all', slotId: f.s.id, card: nameOf(state, f.s.freeze.card) });
         state.discard.push(f.s.freeze.card);
         f.s.freeze = null;
       }
@@ -774,6 +795,14 @@ function actInner(state, pid, a, pend) {
       if (state.over) return state;
       startRound(state);
       break;
+    case 'ready': {
+      pend.answers[pid] = true;
+      emit(state, { type: 'ready', to: 'all', pid });
+      if (pend.pids.some((q) => !pend.answers[q])) return state;
+      state.pending = null;
+      startPlay(state);
+      break;
+    }
     default:
       fail('bad pending');
   }
@@ -822,6 +851,8 @@ function turnAction(state, pid, a) {
       const name = nameOf(state, gs.card);
       emit(state, { type: 'reveal', to: 'all', dur: REVEAL_MS, items: [{ owner: pid, slotId: gs.id, card: name }] });
       if (name === 'guard') {
+        const mk = a.what === 'plus' ? target.plusCards[target.plusCards.length - 1] : target.freeze.card;
+        emit(state, { type: 'markerOff', to: 'all', slotId: target.id, card: nameOf(state, mk) });
         if (a.what === 'plus') { state.discard.push(target.plusCards.pop()); target.plus--; }
         else { state.discard.push(target.freeze.card); target.freeze = null; }
         state.discard.push(removeCardFromSlot(p, gs));
@@ -853,7 +884,7 @@ function turnAction(state, pid, a) {
   }
 }
 
-function keepCard(state, p, slotId, cardId) {
+function keepCard(state, p, slotId, cardId, from = 'deck') {
   const s = p.slots.find((x) => x.id === slotId);
   if (!s || s.freeze || s.locked) fail('bad slot');
   state.limbo.splice(state.limbo.indexOf(cardId), 1);
@@ -861,9 +892,9 @@ function keepCard(state, p, slotId, cardId) {
   s.card = cardId;
   if (old) {
     state.discard.push(old);
-    emit(state, { type: 'discarded', to: 'all', pid: p.id, card: nameOf(state, old), slotId, replaced: true });
+    emit(state, { type: 'discarded', to: 'all', pid: p.id, card: nameOf(state, old), slotId, replaced: true, from });
   } else {
-    emit(state, { type: 'filled', to: 'all', pid: p.id, slotId });
+    emit(state, { type: 'filled', to: 'all', pid: p.id, slotId, from });
   }
 }
 
@@ -871,7 +902,7 @@ function throwCard(state, p, cardId, withEffect) {
   state.limbo.splice(state.limbo.indexOf(cardId), 1);
   state.discard.push(cardId);
   const name = nameOf(state, cardId);
-  emit(state, { type: 'discarded', to: 'all', pid: p.id, card: name });
+  emit(state, { type: 'discarded', to: 'all', pid: p.id, card: name, from: 'deck' });
   if (withEffect && hasEffect(name)) return { k: 'effect', owner: p.id, trigger: cardId };
   return null;
 }
@@ -880,13 +911,40 @@ function holdAction(state, pid, a, pend) {
   const p = player(state, pid);
   if (a.t === 'keep') {
     state.pending = null;
-    try { keepCard(state, p, a.slotId, pend.card); } catch (e) { state.pending = pend; throw e; }
+    try { keepCard(state, p, a.slotId, pend.card, pend.from); } catch (e) { state.pending = pend; throw e; }
     schedule(state, { k: 'endTurn', pid });
   } else if (a.t === 'throw') {
     if (pend.from !== 'deck') fail('a card taken from the floor must be kept');
     state.pending = null;
     const eff = throwCard(state, p, pend.card, true);
     schedule(state, eff, { k: 'endTurn', pid });
+  } else if (a.t === 'throwGuard') {
+    // Refuse your own drawn command: throw it and show a Guard from your cards.
+    // Right guard: command cancelled, guard goes to the floor too.
+    // Wrong card: you take the card under the command, and the command still runs.
+    if (pend.from !== 'deck') fail('a card taken from the floor must be kept');
+    const cname = nameOf(state, pend.card);
+    if (CARD_DEFS[cname].kind !== 'cmd' || cname === 'guard') fail('only a command can be refused');
+    const gs = p.slots.find((x) => x.id === a.slotId);
+    if (!gs || !gs.card || gs.freeze || gs.locked) fail('bad slot');
+    state.pending = null;
+    throwCard(state, p, pend.card, false);
+    const gname = nameOf(state, gs.card);
+    emit(state, { type: 'reveal', to: 'all', dur: REVEAL_MS, items: [{ owner: pid, slotId: gs.id, card: gname }] });
+    if (gname === 'guard') {
+      state.discard.push(removeCardFromSlot(p, gs));
+      emit(state, { type: 'guarded', to: 'all', pid, card: cname, ok: true, self: true, slotId: gs.id });
+      schedule(state, { k: 'endTurn', pid });
+      return;
+    }
+    emit(state, { type: 'guarded', to: 'all', pid, card: cname, ok: false, self: true });
+    const under = cardUnder(state, pend.card);
+    if (under) {
+      takeFromDiscard(state, under);
+      const ns = giveCard(state, p, under);
+      emit(state, { type: 'gave', to: 'all', pid, slotId: ns.id, card: nameOf(state, under), penalty: true });
+    }
+    schedule(state, { k: 'effect', owner: pid, trigger: pend.card }, { k: 'endTurn', pid });
   } else fail('bad hold action');
 }
 
@@ -994,7 +1052,7 @@ export function autoAct(state, pid) {
       state.pending = null;
       if (!c) { schedule(state, { k: 'roundEnd' }); break; }
       state.discard.push(c);
-      emit(state, { type: 'discarded', to: 'all', pid, card: nameOf(state, c), timeout: true });
+      emit(state, { type: 'discarded', to: 'all', pid, card: nameOf(state, c), timeout: true, from: 'deck' });
       schedule(state, { k: 'endTurn', pid });
       break;
     }
@@ -1023,6 +1081,7 @@ export function autoAct(state, pid) {
     }
     case 'snapWindow': return act(state, pid, { t: 'pass' });
     case 'roundOver': return act(state, pid, { t: 'next' });
+    case 'ready': return act(state, pid, { t: 'ready' });
     default: fail('bad pending');
   }
   run(state);
@@ -1110,7 +1169,7 @@ export function viewFor(state, pid) {
     if (pend.ctx) myPending.snapsLeft = 2 - pend.ctx.snaps;
     delete myPending.task; delete myPending.ctx;
     if (pend.kind === 'extra') myPending.cards = pend.cards;
-    if (pend.kind === 'delegate' && pend.answers[pid]) myPending.answered = true;
+    if (pend.answers && pend.answers[pid]) myPending.answered = true;
     delete myPending.answers;
   }
   const top = topDiscard(state);
@@ -1122,14 +1181,17 @@ export function viewFor(state, pid) {
     discardCount: state.discard.length,
     lastActivated: state.lastActivated,
     players: state.players.map((p) => ({
-      id: p.id, name: p.name, team: p.team, bot: !!p.bot, total: p.total, roundScores: p.roundScores,
+      id: p.id, name: p.name, av: p.av || null, team: p.team, bot: !!p.bot, total: p.total, roundScores: p.roundScores,
       turnsPlayed: p.turnsPlayed, finished: !!p.finished, skipNext: p.skipNext,
-      slots: p.slots.map((s) => ({ id: s.id, has: !!s.card, plus: s.plus, frozen: s.freeze ? s.freeze.left : 0, locked: !!s.locked })),
+      slots: p.slots.map((s) => ({ id: s.id, has: !!s.card, plus: s.plus, frozen: s.freeze ? s.freeze.left : 0, locked: !!s.locked,
+        markers: s.plusCards.map((c) => nameOf(state, c)), freezeCard: s.freeze ? nameOf(state, s.freeze.card) : null })),
     })),
     teamTotals: state.teamTotals || null,
     pending: myPending,
     waitingOn: pend ? (pend.pids ? pend.pids.filter((q) => !(pend.answers && q in pend.answers)) : pend.pid ? [pend.pid] : []) : [],
     waitingKind: pend ? pend.kind : null,
+    holding: pend && (pend.kind === 'hold' || pend.kind === 'extra') ? { pid: pend.pid, from: pend.from || 'deck', n: pend.kind === 'extra' ? pend.cards.length : 1 } : null,
+    readyDone: pend && pend.kind === 'ready' ? Object.keys(pend.answers) : null,
   };
 }
 
