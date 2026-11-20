@@ -9,6 +9,7 @@ import { isLocalOnly } from './store.js';
 import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
+const APP_V = 17; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('banana.' + k, JSON.stringify(v)); } catch {} },
@@ -468,7 +469,8 @@ function renderHome() {
     <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ''}
     <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
     <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
-    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>`, { photo: true, cls: 'home' });
+    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>
+    <div class="ver">نسخة ${APP_V}</div>`, { photo: true, cls: 'home' });
 }
 
 function renderBotSetup() {
@@ -1071,4 +1073,9 @@ function netCtx() {
 }
 
 render();
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  // A new version takes over at once; reload so the player sees it (not mid-game).
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && ui.screen !== 'game' && ui.screen !== 'lobby') location.reload(); });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
+}
