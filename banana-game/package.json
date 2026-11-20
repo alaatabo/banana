@@ -1,0 +1,1 @@
+{"type":"module","name":"banana","private":true,"scripts":{"test":"node --test test/*.test.js"}}
