@@ -20,7 +20,7 @@ html, body { margin: 0; height: 100%; }
 body { font-family: var(--body); color: var(--cream); background: #123826; overflow: hidden; user-select: none; }
 button { font-family: inherit; font-size: 1rem; cursor: pointer; border: 0; color: inherit; }
 button:focus-visible, input:focus-visible { outline: 3px solid var(--sky); outline-offset: 3px; }
-#app { height: 100%; max-width: 560px; margin: 0 auto; position: relative; overflow: hidden; padding-top: env(safe-area-inset-top); display: flex; flex-direction: column; }
+#app { height: 100%; max-width: 560px; margin: 0 auto; position: relative; overflow: hidden; container-type: size; box-shadow: 0 0 60px rgba(0,0,0,.6); padding-top: env(safe-area-inset-top); display: flex; flex-direction: column; }
 
 /* ---------- jungle backdrop (screens other than the table) */
 .jungle {
@@ -348,7 +348,7 @@ table.scores tr.win td { background: #fff0b0; font-weight: 800; }
 
 /* ---------- photo backdrop (home + rules) ---------- */
 .screen.photo { background: #2c6b3c url('cards/bg-jungle.webp') center top / cover no-repeat; }
-.screen.photo::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 45%, rgba(10,30,15,.35) 100%); }
+.screen.photo::after { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0; background: linear-gradient(to bottom, rgba(0,0,0,0) 45%, rgba(10,30,15,.35) 100%); }
 .screen.photo.home .screen-in { gap: 14px; }
 .screen.photo.home .logo { width: min(62vw, 250px); margin: 0 auto; }
 .screen.photo.home .spacer { flex: 1; min-height: 10px; }
@@ -404,8 +404,8 @@ table.scores tr.win td { background: #fff0b0; font-weight: 800; }
 
 /* ---------- jungle stage: picture + moving monkey parts ---------- */
 .screen.photo { background: #2c6b3c; }
-.stage { position: fixed; inset: 0; overflow: hidden; z-index: 0; }
-.stage-in { position: absolute; left: 50%; top: 0; width: max(100vw, calc(100dvh * 1024 / 1536)); aspect-ratio: 1024 / 1536; transform: translateX(-50%); }
+.stage { position: absolute; inset: 0; overflow: hidden; z-index: 0; }
+.stage-in { position: absolute; left: 50%; top: 0; width: max(100cqw, calc(100cqh * 1024 / 1536)); aspect-ratio: 1024 / 1536; transform: translateX(-50%); }
 .stage-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-select: none; }
 .stage .lay { position: absolute; display: block; height: auto; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .stage .mk-hit { position: absolute; }
@@ -444,3 +444,8 @@ table.scores tr.win td { background: #fff0b0; font-weight: 800; }
 .pin { width: 100%; box-sizing: border-box; font-size: 1.6rem; text-align: center; letter-spacing: 8px; padding: 10px; border: 3px solid var(--ink); border-radius: 12px; background: #fff; }
 .av-opt.framed { width: 46px; height: 46px; margin: 11px; }
 .av-grid:has(.framed) { row-gap: 6px; }
+
+/* wide screens (computer): the game stays phone-shaped in the middle,
+   with a soft blurred jungle around it */
+body::before { content: ''; position: fixed; inset: -30px; background: #123826 url('cards/bg-jungle.webp') center / cover; filter: blur(18px) brightness(.55); z-index: -1; }
+.pin { color: var(--ink); -webkit-user-select: text; user-select: text; caret-color: var(--ink); font-family: var(--latin), sans-serif; }

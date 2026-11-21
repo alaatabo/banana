@@ -11,7 +11,7 @@ import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
 const APP_DATE = '٢١ نوفمبر ٢٠٢٦';
-const APP_V = 21; // keep in step with the cache name in sw.js
+const APP_V = 22; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('banana.' + k, JSON.stringify(v)); } catch {} },
@@ -1098,7 +1098,7 @@ $app.addEventListener('pointerdown', (ev) => {
     if (gift.kind === 'frame') ui.frame = gift.id;
     if (gift.kind === 'table') ui.tableSel = gift.id;
     if (gift.kind === 'avatar') ui.avSel = gift.id;
-    ui.gift = gift; ui.sheet = 'gift'; render();
+    ui.gift = gift; ui.sheet = 'gift'; ui.sheetAt = Date.now(); render();
   }, () => { ui.sheet = 'owner'; ui.sheetAt = Date.now(); ui.gift = null; render(); setTimeout(() => { const i = document.getElementById('pin'); if (i) i.focus(); }, 50); });
 });
 
@@ -1120,7 +1120,7 @@ function giftSheet() {
 function ownerSheet() {
   return `<div class="sheet-bg wbg" data-close="1"><div class="woodboard pop">
     <div class="wb-title">🔒</div>
-    <div class="wb-body"><div class="parch gift-body"><input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="الرقم"></div>
+    <div class="wb-body"><div class="parch gift-body"><input id="pin" class="pin" type="text" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="الرقم" dir="ltr"></div>
     <button class="plank gold" data-pin="1">تمام</button></div></div></div>`;
 }
 
@@ -1130,8 +1130,8 @@ $app.addEventListener('click', (ev) => {
   const d = t.dataset;
   const nm = document.getElementById('nm');
   if (nm) { ui.name = nm.value.trim().slice(0, 14); LS.set('name', ui.name); }
-  if (d.close && ev.target === t) { if (ui.sheet === 'owner' && Date.now() - (ui.sheetAt || 0) < 800) return; ui.sheet = null; ui.ownerWelcome = false; return render(); }
-  if (d.close) { if (t.tagName === 'BUTTON') { ui.sheet = null; ui.ownerWelcome = false; render(); } return; }
+  if (d.close && ev.target === t) { if ((ui.sheet === 'owner' || ui.sheet === 'gift') && Date.now() - (ui.sheetAt || 0) < 800) return; ui.sheet = null; ui.ownerWelcome = false; return render(); }
+  if (d.close) { if (t.tagName === 'BUTTON') { if ((ui.sheet === 'owner' || ui.sheet === 'gift') && Date.now() - (ui.sheetAt || 0) < 800) return; ui.sheet = null; ui.ownerWelcome = false; render(); } return; }
   if (d.lp != null) { ui.learnPage = +d.lp; return render(); }
   if (d.go === 'rules') ui.learnPage = 0;
   if (d.go) { ui.error = ''; ui.screen = d.go; return render(); }
@@ -1150,7 +1150,7 @@ $app.addEventListener('click', (ev) => {
   if (d.lobby) return ui.lobby && ui.lobby.handle(d.lobby, +d.i);
   if (d.pin) {
     const v = (document.getElementById('pin') || {}).value || '';
-    if (unlockAll(v)) { ui.ownerWelcome = true; ui.sheet = 'gift'; } else ui.sheet = null;
+    if (unlockAll(v)) { ui.ownerWelcome = true; ui.sheet = 'gift'; ui.sheetAt = Date.now(); } else ui.sheet = null;
     return render();
   }
   if (d.ph != null) { ui.scorePid = d.ph || null; return render(); }
