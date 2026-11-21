@@ -45,6 +45,33 @@ export function fly(a, b, { face = null, flipTo, dur = 560, delay = 0 } = {}) {
   return anim.finished.catch(() => {}).then(() => el.remove());
 }
 
+// A card everyone should see: it grows face-up where it is, travels face-up
+// to its new slot, settles, then turns face-down.
+export function flyShow(a, b, face, { dur = 1500 } = {}) {
+  if (!a || !b || reduce) return Promise.resolve();
+  const w = Math.max(28, Math.min(80, b.width > b.height ? b.height : b.width) || 60);
+  const h = w * 1.4;
+  const el = document.createElement('div');
+  el.className = 'fly show';
+  el.style.width = w + 'px';
+  el.style.height = h + 'px';
+  el.innerHTML = cardSVG(face);
+  fxLayer().appendChild(el);
+  const ca = center(a), cb = center(b);
+  const at = (p, sc) => `translate(${p.x - w / 2}px, ${p.y - h / 2}px) scale(${sc})`;
+  const anim = el.animate([
+    { transform: at(ca, 1), offset: 0 },
+    { transform: at(ca, 1.6), offset: 0.2 },
+    { transform: at(ca, 1.6), offset: 0.32 },
+    { transform: at(cb, 1.35), offset: 0.72 },
+    { transform: at(cb, 1), offset: 0.82 },
+    { transform: at(cb, 1) + ' scaleX(0)', offset: 0.91 },
+    { transform: at(cb, 1), offset: 1 },
+  ], { duration: dur, easing: 'ease-in-out', fill: 'both' });
+  setTimeout(() => { el.innerHTML = backSVG(); }, dur * 0.91);
+  return anim.finished.catch(() => {}).then(() => el.remove());
+}
+
 export function popCommand(name) {
   if (reduce) return Promise.resolve();
   const el = document.createElement('div');
@@ -74,6 +101,6 @@ export function announce({ html, title, desc, hot }) {
   el.querySelector('.a-title').textContent = title;
   el.querySelector('.a-desc').textContent = desc;
   fxLayer().appendChild(el);
-  const ms = 3000;
+  const ms = /[?&]fast/.test(location.search) ? 300 : 3000; // tests run fast
   return new Promise((res) => setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); res(); }, 250); }, ms));
 }

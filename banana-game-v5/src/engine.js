@@ -153,11 +153,11 @@ export function createGame({ mode, players, seed = Date.now() }) {
     v: 1, mode, rng: seed | 0, seq: 0, slotSeq: 0, events: [],
     cards: {}, deck: [], discard: [], limbo: [],
     players: players.map((pl, i) => ({
-      id: pl.id, name: pl.name, av: pl.av || null, bot: pl.bot || null, team: mode === 'team' ? i % 2 : i,
-      slots: [], turnsPlayed: 0, skipNext: false, total: 0, roundScores: [],
+      id: pl.id, name: pl.name, av: pl.av || null, fr: pl.fr || null, bot: pl.bot || null, team: mode === 'team' ? i % 2 : i,
+      slots: [], turnsPlayed: 0, skipNext: false, total: 0, roundScores: [], roundHands: [],
     })),
     round: 0, tiebreak: 0, startIdx: -1, current: null,
-    stack: [], pending: null, lastActivated: null,
+    stack: [], pending: null, lastActivated: null, floorCmd: null, clock: 0,
     banana: null, finalQueue: null, teamFinisher: null, deckOut: false,
     over: false, winners: null,
   };
@@ -184,14 +184,14 @@ function startRound(state) {
   state.discard = [];
   state.limbo = [];
   state.stack = [];
-  state.lastActivated = null;
+  state.lastActivated = null; state.floorCmd = null;
   state.banana = null; state.finalQueue = null; state.teamFinisher = null; state.deckOut = false;
   for (const p of state.players) {
     p.slots = []; p.turnsPlayed = 0; p.skipNext = false; p.finished = false;
     for (let k = 0; k < 4; k++) giveCard(state, p, state.deck.pop());
   }
   const blind = roundType(state) === 'blind';
-  if (!blind) state.discard.push(state.deck.pop());
+  if (!blind) toFloor(state, state.deck.pop());
   state.startIdx = state.startIdx < 0 ? rint(state, state.players.length) : (state.startIdx + 1) % state.players.length;
   emit(state, { type: 'roundStart', to: 'all', round: state.round, kind: roundType(state), tiebreak: state.tiebreak });
   state.current = null;
@@ -279,7 +279,7 @@ const TASKS = {
           s.freeze.left--;
           if (s.freeze.left <= 0) {
             emit(state, { type: 'markerOff', to: 'all', slotId: s.id, card: nameOf(state, s.freeze.card) });
-            state.discard.push(s.freeze.card);
+            toFloor(state, s.freeze.card);
             s.freeze = null;
             emit(state, { type: 'unfreeze', to: 'all', slotId: s.id, owner: p.id });
           }
@@ -345,14 +345,14 @@ const TASKS = {
       const target = player(state, t.target);
       if (!t.announced) {
         t.announced = true;
-        emit(state, { type: 'targeted', to: 'all', by: t.exec, target: t.target, card: t.card, slotId: t.then && (t.then.slotId || t.then.theirs) || t.observeSlot || null });
+        emit(state, { type: 'targeted', to: 'all', by: t.exec, target: t.target, targets: [t.target], card: t.card, option: t.option || null, viaCopy: !!t.viaCopy, slotId: t.then && (t.then.slotId || t.then.theirs) || t.observeSlot || null });
       }
       if (t.target === t.exec || hasNoCards(target)) { schedule(state, t.then); return; }
-      setPending(state, { kind: 'guard', pid: t.target, card: t.card, by: t.exec, task: t });
+      setPending(state, { kind: 'guard', pid: t.target, card: t.card, option: t.option || null, viaCopy: !!t.viaCopy, by: t.exec, task: t });
     },
 
     // generic continuation helpers
-    set(state, t) { state.lastActivated = t.name; },
+    set(state, t) { setLast(state, t.name); },
     extraContinue(state, t) { pendExtra(state, t.pid, t.ctx); },
     observeReveal(state, t) {
       for (const it of t.picks) {
@@ -362,7 +362,7 @@ const TASKS = {
           reveal(state, [t.exec], [f]);
         }
       }
-      state.lastActivated = 'choose';
+      setLast(state, 'choose');
     },
     apply(state, t) { APPLY[t.what](state, t); },
     noop() {},
@@ -453,8 +453,9 @@ function execEffect(state, t) {
       return pendTarget(state, { ...t, step: 'guardFix' }, { type: 'clear', options: opts });
     }
     case 'copy': {
-      const last = state.lastActivated;
-      if (!last) { emit(state, { type: 'noEffect', to: 'all', card: 'copy' }); return; }
+      const last = lastCommand(state);
+      if (!last || last === 'copy') { emit(state, { type: 'noEffect', to: 'all', card: 'copy' }); return; }
+      emit(state, { type: 'copied', to: 'all', pid: exec, card: last });
       schedule(state, { ...t, k: 'exec', name: last, viaCopy: true });
       return;
     }
@@ -469,7 +470,7 @@ function execEffect(state, t) {
       state.limbo.push(...cards);
       for (const c of cards) emit(state, { type: 'drew', to: [exec], card: nameOf(state, c), cardId: c });
       emit(state, { type: 'drewHidden', to: 'all', pid: exec, n: cards.length });
-      state.lastActivated = 'extra';
+      setLast(state, 'extra');
       return pendExtra(state, exec, { cards, snaps: 0 });
     }
     case 'plus': case 'freeze': {
@@ -497,9 +498,24 @@ function execEffect(state, t) {
   }
 }
 
+// Copy repeats the most recent command: the last one played, or the last
+// command card that landed on the floor (even if its power wasn't played).
+function setLast(state, name) { state.lastActivated = name; state.lastActAt = ++state.clock; }
+function toFloor(state, ...ids) {
+  for (const id of ids) {
+    state.discard.push(id);
+    const n = nameOf(state, id);
+    if (isCmd(n) && n !== 'copy') { state.floorCmd = n; state.floorCmdAt = ++state.clock; }
+  }
+}
+function lastCommand(state) {
+  if (state.floorCmd && (!state.lastActivated || state.floorCmdAt > state.lastActAt)) return state.floorCmd;
+  return state.lastActivated;
+}
+
 function done(state, t) {
   // Record "last command actually activated" for copy. Number effects never count.
-  if (isCmd(t.name) && t.name !== 'guard') state.lastActivated = t.name;
+  if (isCmd(t.name)) setLast(state, t.name);
 }
 
 function shuffleCards(state, p) {
@@ -573,14 +589,14 @@ const APPLY = {
   },
   shuffle(state, t) {
     shuffleCards(state, player(state, t.target));
-    state.lastActivated = 'choose';
+    setLast(state, 'choose');
   },
   skip(state, t) {
     const p = player(state, t.target);
     if (state.banana === p.id) return;
     p.skipNext = true;
     emit(state, { type: 'willSkip', to: 'all', pid: p.id });
-    state.lastActivated = 'choose';
+    setLast(state, 'choose');
   },
 };
 
@@ -589,7 +605,8 @@ function resolveTarget(state, pend, a) {
   const t = pend.task;
   const spec = pend.spec;
   const exec = t.exec;
-  const check = (target, then) => ({ k: 'guardCheck', target, exec, card: t.name, trigger: t.trigger, then });
+  const option = t.step && t.step.startsWith('choose_') ? t.step.slice(7) : null;
+  const check = (target, then) => ({ k: 'guardCheck', target, exec, card: t.name, option, viaCopy: t.viaCopy, trigger: t.trigger, then });
   switch (t.step) {
     case 'revealOwn': {
       if (!spec.options.includes(a.slotId)) fail('bad slot');
@@ -614,15 +631,15 @@ function resolveTarget(state, pend, a) {
       const f = findSlot(state, a.slotId);
       if (a.what === 'card') {
         reveal(state, 'all', [f]);
-        state.discard.push(removeCardFromSlot(f.p, f.s));
+        toFloor(state, removeCardFromSlot(f.p, f.s));
       } else if (a.what === 'plus') {
         emit(state, { type: 'markerOff', to: 'all', slotId: f.s.id, card: nameOf(state, f.s.plusCards[f.s.plusCards.length - 1]) });
-        state.discard.push(f.s.plusCards.pop());
+        toFloor(state, f.s.plusCards.pop());
         f.s.plus--;
         if (f.s.plus === 0 && !f.s.card) f.p.slots.splice(f.p.slots.indexOf(f.s), 1);
       } else {
         emit(state, { type: 'markerOff', to: 'all', slotId: f.s.id, card: nameOf(state, f.s.freeze.card) });
-        state.discard.push(f.s.freeze.card);
+        toFloor(state, f.s.freeze.card);
         f.s.freeze = null;
       }
       emit(state, { type: 'cleared', to: 'all', pid: exec, slotId: a.slotId, what: a.what, card: t.step === 'clear' ? 'clear' : 'guard' });
@@ -673,7 +690,7 @@ function resolveTarget(state, pend, a) {
         const top = state.deck[state.deck.length - 1];
         if (top) emit(state, { type: 'reveal', to: [exec], dur: REVEAL_MS, items: [{ deckTop: true, card: nameOf(state, top) }] });
         emit(state, { type: 'peekedDeck', to: 'all', pid: exec });
-        state.lastActivated = 'choose';
+        setLast(state, 'choose');
         return;
       }
       if (a.option === 'shuffle' || a.option === 'skip') {
@@ -719,8 +736,11 @@ function resolveTarget(state, pend, a) {
       for (const pk of picks) {
         if (pk.pid === exec) { kept.push(pk); continue; }
         kept.push(pk);
-        tasks.push({ k: 'guardCheck', target: pk.pid, exec, card: 'choose', trigger: t.trigger, observeSlot: pk.slotId, then: { k: 'noop' } });
+        tasks.push({ k: 'guardCheck', target: pk.pid, exec, card: 'choose', option: 'observe', trigger: t.trigger, observeSlot: pk.slotId, then: { k: 'noop' }, announced: true });
       }
+      // One announcement for everyone it touches, then each may guard in turn.
+      const who = picks.map((x) => x.pid).filter((x) => x !== exec);
+      if (who.length) emit(state, { type: 'targeted', to: 'all', by: exec, target: who[0], targets: who, card: 'choose', option: 'observe', viaCopy: !!t.viaCopy, slotIds: picks.map((x) => x.slotId) });
       const holder = { k: 'observeReveal', exec, picks: kept };
       schedule(state, ...tasks, holder);
       return;
@@ -735,7 +755,7 @@ function resolveTarget(state, pend, a) {
         takeFromDiscard(state, t.trigger); // the choose card moves into the slot
         f.s.card = t.trigger;
         f.s.locked = true; // the choose card can't be touched for the rest of this turn
-        state.discard.push(cmdCard);
+        toFloor(state, cmdCard);
         emit(state, { type: 'activated', to: 'all', pid: exec, card: cname, slotId: f.s.id });
         schedule(state, { k: 'exec', name: cname, exec, trigger: cmdCard, exclude: f.s.id });
       } else {
@@ -746,7 +766,7 @@ function resolveTarget(state, pend, a) {
           const ns = giveCard(state, f.p, under);
           emit(state, { type: 'gave', to: 'all', pid: f.p.id, slotId: ns.id, card: nameOf(state, under), penalty: true });
         }
-        state.lastActivated = 'choose';
+        setLast(state, 'choose');
       }
       return;
     }
@@ -867,9 +887,9 @@ function turnAction(state, pid, a) {
       if (name === 'guard') {
         const mk = a.what === 'plus' ? target.plusCards[target.plusCards.length - 1] : target.freeze.card;
         emit(state, { type: 'markerOff', to: 'all', slotId: target.id, card: nameOf(state, mk) });
-        if (a.what === 'plus') { state.discard.push(target.plusCards.pop()); target.plus--; }
-        else { state.discard.push(target.freeze.card); target.freeze = null; }
-        state.discard.push(removeCardFromSlot(p, gs));
+        if (a.what === 'plus') { toFloor(state, target.plusCards.pop()); target.plus--; }
+        else { toFloor(state, target.freeze.card); target.freeze = null; }
+        toFloor(state, removeCardFromSlot(p, gs));
         if (target.plus === 0 && !target.card && p.slots.includes(target)) p.slots.splice(p.slots.indexOf(target), 1);
         emit(state, { type: 'guardUsed', to: 'all', pid, ok: true, what: a.what, slotId: target.id, guardSlot: gs.id });
       } else {
@@ -905,7 +925,7 @@ function keepCard(state, p, slotId, cardId, from = 'deck') {
   const old = s.card;
   s.card = cardId;
   if (old) {
-    state.discard.push(old);
+    toFloor(state, old);
     emit(state, { type: 'discarded', to: 'all', pid: p.id, card: nameOf(state, old), slotId, replaced: true, from });
   } else {
     emit(state, { type: 'filled', to: 'all', pid: p.id, slotId, from });
@@ -923,7 +943,7 @@ function mateSnap(state, pid) {
 
 function throwCard(state, p, cardId, withEffect) {
   state.limbo.splice(state.limbo.indexOf(cardId), 1);
-  state.discard.push(cardId);
+  toFloor(state, cardId);
   const name = nameOf(state, cardId);
   emit(state, { type: 'discarded', to: 'all', pid: p.id, card: name, from: 'deck' });
   if (withEffect && hasEffect(name)) return { k: 'effect', owner: p.id, trigger: cardId };
@@ -955,7 +975,7 @@ function holdAction(state, pid, a, pend) {
     const gname = nameOf(state, gs.card);
     emit(state, { type: 'reveal', to: 'all', dur: REVEAL_MS, items: [{ owner: pid, slotId: gs.id, card: gname }] });
     if (gname === 'guard') {
-      state.discard.push(removeCardFromSlot(p, gs));
+      toFloor(state, removeCardFromSlot(p, gs));
       emit(state, { type: 'guarded', to: 'all', pid, card: cname, ok: true, self: true, slotId: gs.id });
       schedule(state, { k: 'endTurn', pid });
       return;
@@ -1022,7 +1042,7 @@ function doSnap(state, pid, slotId) {
   if (!top) fail('nothing to snap on');
   const mine = nameOf(state, s.card), want = nameOf(state, top);
   if (mine === want) {
-    state.discard.push(removeCardFromSlot(p, s));
+    toFloor(state, removeCardFromSlot(p, s));
     emit(state, { type: 'snap', to: 'all', pid, card: mine, ok: true, slotId });
     return true;
   }
@@ -1049,7 +1069,7 @@ function guardAction(state, pid, a, pend) {
   const name = nameOf(state, s.card);
   emit(state, { type: 'reveal', to: 'all', dur: REVEAL_MS, items: [{ owner: pid, slotId: s.id, card: name }] });
   if (name === 'guard') {
-    state.discard.push(removeCardFromSlot(p, s));
+    toFloor(state, removeCardFromSlot(p, s));
     emit(state, { type: 'guarded', to: 'all', pid, card: t.card, ok: true });
     // Blocked: the command does not happen (for observe only this player's peek).
     if (t.observeSlot) {
@@ -1079,7 +1099,7 @@ export function autoAct(state, pid) {
       const c = drawCard(state);
       state.pending = null;
       if (!c) { schedule(state, { k: 'roundEnd' }); break; }
-      state.discard.push(c);
+      toFloor(state, c);
       emit(state, { type: 'discarded', to: 'all', pid, card: nameOf(state, c), timeout: true, from: 'deck' });
       schedule(state, { k: 'endTurn', pid });
       break;
@@ -1140,7 +1160,7 @@ export function handValue(state, p) {
 function roundEnd(state) {
   state.pending = null;
   // Cards still "in hand" (extra) at round end go back to the discard.
-  state.discard.push(...state.limbo.splice(0));
+  toFloor(state, ...state.limbo.splice(0));
   const sums = state.players.map((p) => handValue(state, p));
   const mult = roundType(state) === 'double' ? 2 : 1;
   let unit; // per side (player in solo, team in team)
@@ -1156,6 +1176,8 @@ function roundEnd(state) {
     slots: p.slots.map((s) => ({ card: s.card ? nameOf(state, s.card) : null, plus: s.plus, frozen: !!s.freeze })),
     sum: handValue(state, p),
   }));
+  // Keep every round's cards so the score board can show them later.
+  detail.forEach((d, i) => { const p = state.players[i]; (p.roundHands = p.roundHands || []).push({ slots: d.slots, sum: d.sum, win: wins[state.mode === 'team' ? p.team : i] }); });
   if (state.mode === 'team') {
     for (const p of state.players) p.roundScores.push(scores[p.team]);
     state.teamTotals = state.teamTotals || [0, 0];
@@ -1207,9 +1229,9 @@ export function viewFor(state, pid) {
     deckCount: state.deck.length,
     discardTop: top ? nameOf(state, top) : null,
     discardCount: state.discard.length,
-    lastActivated: state.lastActivated,
+    lastActivated: lastCommand(state),
     players: state.players.map((p) => ({
-      id: p.id, name: p.name, av: p.av || null, team: p.team, bot: !!p.bot, total: p.total, roundScores: p.roundScores,
+      id: p.id, name: p.name, av: p.av || null, fr: p.fr || null, team: p.team, bot: !!p.bot, total: p.total, roundScores: p.roundScores, roundHands: p.roundHands || [],
       turnsPlayed: p.turnsPlayed, finished: !!p.finished, skipNext: p.skipNext,
       slots: p.slots.map((s) => ({ id: s.id, has: !!s.card, plus: s.plus, frozen: s.freeze ? s.freeze.left : 0, locked: !!s.locked,
         markers: s.plusCards.map((c) => nameOf(state, c)), freezeCard: s.freeze ? nameOf(state, s.freeze.card) : null })),

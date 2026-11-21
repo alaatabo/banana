@@ -41,6 +41,7 @@ export function avatarInner(id) {
   const b = BOT_AVATARS.indexOf(id);
   if (b >= 0) return robot(b);
   if (AVATAR_IDS.includes(id)) return `<img class="avf" src="avatars/${id}.webp" alt="" draggable="false">`;
+  if (/^g[1-5]$/.test(id)) return `<img class="avf" src="gifts/av${id.slice(1)}.webp" alt="" draggable="false">`;
   return null;
 }
 
@@ -49,4 +50,9 @@ export const isPlayerAvatar = (id) => AVATAR_IDS.includes(id);
 // Next free robot colour at a table.
 export function nextBotAvatar(used = []) {
   return BOT_AVATARS.find((x) => !used.includes(x)) || BOT_AVATARS[0];
+}
+
+// Gift frames: a ring drawn around a player's picture.
+export function frameHTML(fr) {
+  return typeof fr === 'string' && /^f[1-5]$/.test(fr) ? `<img class="frame" src="gifts/frame${fr.slice(1)}.webp" alt="" draggable="false">` : '';
 }

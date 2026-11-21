@@ -1,6 +1,7 @@
 import { learnHTML, LEARN } from './learn.js';
 import { pickBotNames } from './bot.js';
-import { AVATAR_IDS, avatarInner, isPlayerAvatar } from './avatars.js';
+import { onSecretTap, unlockAll, ownedFrames, ownedTables, ownedAvatars, giftById } from './secret.js';
+import { AVATAR_IDS, avatarInner, isPlayerAvatar, frameHTML } from './avatars.js';
 import { Host } from './host.js';
 import { cardSVG, backSVG, CARD_INFO, CARD_DESC } from './cards.js';
 import { NUM_EFFECT } from './engine.js';
@@ -9,7 +10,8 @@ import { isLocalOnly } from './store.js';
 import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
-const APP_V = 19; // keep in step with the cache name in sw.js
+const APP_DATE = '٢١ نوفمبر ٢٠٢٦';
+const APP_V = 21; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('banana.' + k, JSON.stringify(v)); } catch {} },
@@ -101,21 +103,34 @@ const CHOSE_AR = {
 };
 
 // Events that stop the game for a big announcement before anything else.
+// One box per command: "X هينفذ Y على A و B". Cards that pick a target are
+// announced once the target is known; the target himself gets the same box
+// with the Guard question instead (see guardBox).
+const TARGETING = new Set(['swap', 'buzz', 'curse', 'tornado', 'plus', 'freeze', 'choose', 'copy']);
 function gateOf(e) {
   const by = (pid) => (pid === ui.me ? 'إنت' : pname(pid));
-  if (e.type === 'effect' && CARD_DESC[e.card]) {
-    return { card: e.card, title: `${by(e.pid)} ${e.pid === ui.me ? 'لعبت' : 'لعب'} ${cardName(e.card)}${e.viaCopy ? ' (بـ Copy)' : ''}`, desc: CARD_DESC[e.card] };
+  const will = (pid) => (pid === ui.me ? 'هتنفذ' : 'هينفذ');
+  if (e.type === 'effect' && CARD_DESC[e.card] && !TARGETING.has(e.card)) {
+    return { card: e.card, title: `${by(e.pid)} ${will(e.pid)} ${cardName(e.card)}`, desc: CARD_DESC[e.card] };
   }
-  if (e.type === 'targeted' && e.target !== e.by) {
-    const onMe = e.target === ui.me;
-    return { card: e.card, hot: onMe, title: onMe ? `${by(e.by)} هيعمل عليك ${cardName(e.card)}!` : `${by(e.by)} ${e.by === ui.me ? 'هتعمل' : 'هيعمل'} ${cardName(e.card)} على ${by(e.target)}`, desc: CARD_DESC[e.card] };
+  if (e.type === 'copied' && !TARGETING.has(e.card)) {
+    return { card: e.card, title: `${by(e.pid)} ${will(e.pid)} ${cardName(e.card)} بـ Copy`, desc: CARD_DESC[e.card] };
   }
-  if (e.type === 'chose' && CHOSE_AR[e.option]) {
-    return { card: 'choose', title: `${by(e.pid)} اختار: ${CHOSE_AR[e.option][0]}`, desc: CHOSE_AR[e.option][1] };
+  if (e.type === 'chose' && (e.option === 'peek' || e.option === 'activate')) {
+    return { card: 'choose', title: `${by(e.pid)} ${will(e.pid)} ${OPTION_AR[e.option][0]} من Choose`, desc: CHOSE_AR[e.option][1] };
+  }
+  if (e.type === 'targeted') {
+    const targets = e.targets || [e.target];
+    if (targets.includes(ui.me) && e.by !== ui.me) return null; // my own box asks about the Guard
+    const name = e.option ? `${OPTION_AR[e.option][0]} من Choose` : cardName(e.card);
+    const on = targets.length === 1 && targets[0] === e.by ? (e.by === ui.me ? 'على نفسك' : 'على نفسه') : 'على ' + targets.map(by).join(' و');
+    return { card: e.card, title: `${by(e.by)} ${will(e.by)} ${name}${e.viaCopy ? ' بـ Copy' : ''} ${on}`, desc: e.option ? CHOSE_AR[e.option][1] : CARD_DESC[e.card] };
   }
   if (e.type === 'guarded' && e.self && e.ok) {
     return { card: 'guard', title: `${by(e.pid)} رفض ${cardName(e.card)} بالـ Guard`, desc: 'الأمر اتلغى، والـ Guard راح الأرض' };
   }
+  // End of a round / the game: let the last move finish and be seen first.
+  if (e.type === 'roundEnd' || e.type === 'gameOver') return { pause: /[?&]fast/.test(location.search) ? 200 : 1600 };
   return null;
 }
 
@@ -135,6 +150,17 @@ async function pumpUpdates() {
         if (k < 0) { applyUpdate(view, rest); break; }
         const g = gateOf(rest[k]);
         ui.gated = true;
+        if (g.pause) {
+          applyUpdate(view, rest.slice(0, k));
+          await fxIdle();
+          if (gen !== ui.gen) return;
+          await FX.wait(g.pause);
+          if (gen !== ui.gen) return;
+          // apply the end-of-round event itself, then keep going after it
+          applyUpdate(view, rest.slice(k, k + 1));
+          rest = rest.slice(k + 1);
+          continue;
+        }
         applyUpdate(view, rest.slice(0, k + 1));
         await fxIdle();
         if (gen !== ui.gen) return;
@@ -229,7 +255,14 @@ function animate(events, B, A, oldView) {
         const mine = e.pid === ui.me;
         const keptFace = mine && oldView && oldView.pending && oldView.pending.name ? oldView.pending.name : (e.from === 'discard' && ui.heldPublic ? ui.heldPublic.card : null);
         FX.enqueue(async () => {
-          if (e.slotId) {
+          if (e.slotId && e.from === 'discard' && keptFace) {
+            // a floor card everyone saw: it grows, travels face-up, then turns over
+            await Promise.all([
+              FX.flyShow(from, A[e.slotId], keptFace),
+              FX.fly(B[e.slotId] || A[e.slotId], A.discard, { flipTo: e.card, dur: 750, delay: 650 }),
+            ]);
+            lightUp([e.slotId]);
+          } else if (e.slotId) {
             await Promise.all([
               FX.fly(from, A[e.slotId], keptFace ? { face: keptFace, flipTo: 'back', dur: 750 } : { dur: 750 }),
               FX.fly(B[e.slotId] || A[e.slotId], A.discard, { flipTo: e.card, dur: 750, delay: 60 }),
@@ -274,13 +307,13 @@ function animate(events, B, A, oldView) {
             const el = $app.querySelector(`[data-slot="${e.slotId}"]`);
             if (el) { el.classList.add('shake'); setTimeout(() => el.classList.remove('shake'), 520); }
             await FX.wait(450);
-            if (e.newSlot) await FX.fly(B.discard, A[e.newSlot], { face: e.penalty, flipTo: 'back', dur: 600 });
+            if (e.newSlot) await FX.flyShow(B.discard, A[e.newSlot], e.penalty);
             lightUp([e.newSlot, e.slotId]);
           }
         });
         break;
       case 'gave':
-        FX.enqueue(async () => { await FX.fly(B.discard, A[e.slotId], { face: e.card, flipTo: 'back', dur: 620 }); lightUp([e.slotId]); });
+        FX.enqueue(async () => { if (e.card) await FX.flyShow(B.discard, A[e.slotId], e.card); else await FX.fly(B.discard, A[e.slotId], { dur: 620 }); lightUp([e.slotId]); });
         break;
       case 'swapped':
         FX.enqueue(async () => {
@@ -322,7 +355,7 @@ function animate(events, B, A, oldView) {
       case 'guardUsed':
         FX.enqueue(async () => {
           if (e.ok) { await FX.fly(B[e.guardSlot], A.discard, { face: 'guard', dur: 560 }); lightUp([e.slotId]); }
-          else if (e.newSlot) { await FX.fly(B.discard, A[e.newSlot], { face: e.penalty, flipTo: 'back', dur: 600 }); lightUp([e.newSlot]); }
+          else if (e.newSlot) { await FX.flyShow(B.discard, A[e.newSlot], e.penalty); lightUp([e.newSlot]); }
         });
         break;
       case 'reveal':
@@ -406,7 +439,7 @@ function startBots() {
   const n = s.mode === 'team' ? 4 : s.count;
   const botNames = pickBotNames(n - 1, LS.get('lastBots') || []);
   LS.set('lastBots', botNames);
-  const players = [{ id: 'me', name: ui.name || 'أنا', av: myAvatar() }];
+  const players = [{ id: 'me', name: ui.name || 'أنا', av: myAvatar(), fr: myFrame() }];
   for (let i = 1; i < n; i++) players.push({ id: 'b' + i, name: botNames[i - 1], bot: s.level, av: 'bot' + (i - 1) });
   const host = new Host({ mode: s.mode, players, timed: s.timed, botDelay: /fast/.test(location.search) ? 40 : 900 });
   ui.me = 'me';
@@ -451,8 +484,25 @@ function leafSVG(cls, style) {
 }
 const LEAVES = leafSVG('', 'left:-70px;bottom:-30px;transform:rotate(-10deg)') + leafSVG('', 'right:-80px;bottom:60px;transform:scaleX(-1) rotate(-14deg)') + leafSVG('', 'left:-90px;top:-40px;transform:rotate(30deg) scale(.7)') + leafSVG('', 'right:-90px;top:-50px;transform:scaleX(-1) rotate(30deg) scale(.7)');
 
+// The jungle picture, with the monkeys' heads and tails as separate layers
+// so they can move. Placed exactly like the picture (cover, top-centred).
+const LAYERS = [
+  // id, monkey, x, y, w, h (in the 1024×1536 picture), pivot
+  ['L_tail', 'L', 90, 304, 71, 132, '92% 80%'],
+  ['L_head', 'L', 143, 187, 192, 143, '50% 98%'],
+  ['R_tail', 'R', 910, 641, 83, 127, '2% 66%'],
+  ['R_head', 'R', 744, 495, 191, 148, '53% 98%'],
+];
+const MONKEY_BODY = { L: [150, 300, 190, 190], R: [745, 620, 175, 180] };
+const pct = (v, of) => `${(v / of * 100).toFixed(3)}%`;
+function jungleStage(interactive) {
+  const lay = LAYERS.map(([id, m, x, y, w, h, o]) => `<img class="lay ${id}" data-mk="${interactive ? m : ''}" src="cards/${id}.webp" alt="" draggable="false" style="left:${pct(x, 1024)};top:${pct(y, 1536)};width:${pct(w, 1024)};transform-origin:${o}">`).join('');
+  const hits = interactive ? Object.entries(MONKEY_BODY).map(([m, [x, y, w, h]]) => `<i class="mk-hit" data-mk="${m}" style="left:${pct(x, 1024)};top:${pct(y, 1536)};width:${pct(w, 1024)};height:${pct(h, 1536)}"></i>`).join('') : '';
+  return `<div class="stage" aria-hidden="true"><div class="stage-in"><img class="stage-bg" src="cards/bg-jungle-base.webp" alt="" draggable="false">${hits}${lay}</div></div>`;
+}
+
 function screen(inner, { photo = false, cls = '' } = {}) {
-  if (photo) return `<div class="screen photo ${cls}"><div class="screen-in">${inner}</div></div>`;
+  if (photo) return `<div class="screen photo ${cls}">${jungleStage(cls === 'home')}<div class="screen-in">${inner}</div></div>`;
   return `<div class="screen jungle">${LEAVES}<div class="screen-in">${inner}</div></div>`;
 }
 const backBtn = (to) => `<button class="round" data-go="${to}" aria-label="رجوع" style="align-self:flex-start">${ICON.back}</button>`;
@@ -460,21 +510,24 @@ const backBtn = (to) => `<button class="round" data-go="${to}" aria-label="رج�
 function avatarSheet() {
   const cur = myAvatar();
   return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>اختار صورتك</h2>
-    <div class="av-grid">${AVATAR_IDS.map((id) => `<button class="avatar av-opt ${id === cur ? 'on' : ''}" data-av="${id}" aria-label="صورة ${id.slice(1)}">${avatarInner(id)}</button>`).join('')}</div>
+    <div class="av-grid">${AVATAR_IDS.concat(ownedAvatars().map((g) => g.id)).map((id) => `<button class="avatar av-opt ${id === cur ? 'on' : ''}" data-av="${id}" aria-label="صورة">${avatarInner(id)}</button>`).join('')}</div>
+    ${ownedFrames().length ? `<h2 style="margin-top:14px">الإطار</h2><div class="av-grid">
+      <button class="avatar av-opt ${!myFrame() ? 'on' : ''}" data-fr="" aria-label="من غير إطار">${avatarInner(cur)}</button>
+      ${ownedFrames().map((g) => `<button class="avatar av-opt framed ${myFrame() === g.id ? 'on' : ''}" data-fr="${g.id}" aria-label="إطار">${avatarInner(cur)}${frameHTML(g.id)}</button>`).join('')}</div>` : ''}
     <button class="plank cream" data-close="1" style="width:100%;margin-top:12px">رجوع</button></div></div>`;
 }
 
 function renderHome() {
   $app.innerHTML = screen(`
     <div class="spacer top"></div>
-    <img class="logo" src="cards/logo.webp" alt="بانانا">
+    <img class="logo" data-mk="logo" src="cards/logo.webp" alt="بانانا" draggable="false">
     <div class="spacer"></div>
-    <div class="me-row"><button class="avatar pick-av" data-sheet="avatar" aria-label="غيّر صورتك">${avatarInner(myAvatar())}<i class="pen">✎</i></button>
-    <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ''}
+    <div class="me-row"><button class="avatar pick-av ${myFrame() ? 'framed' : ''}" data-sheet="avatar" aria-label="غيّر صورتك">${avatarInner(myAvatar())}${frameHTML(myFrame())}<i class="pen">✎</i></button>
+    <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ui.sheet === 'gift' ? giftSheet() : ui.sheet === 'owner' ? ownerSheet() : ''}
     <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
     <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
     <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>
-    <div class="ver">نسخة ${APP_V}</div>`, { photo: true, cls: 'home' });
+    <div class="ver">آخر تحديث: ${APP_DATE}</div>`, { photo: true, cls: 'home' });
 }
 
 function renderBotSetup() {
@@ -522,13 +575,18 @@ function renderOnline() {
     ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}`);
 }
 
-function myAvatar() { const a = LS.get('avatar'); return isPlayerAvatar(a) ? a : 'p1'; }
+function myAvatar() {
+  if (ui.avSel && ownedAvatars().some((g) => g.id === ui.avSel)) return ui.avSel;
+  const a = LS.get('avatar'); return isPlayerAvatar(a) ? a : 'p1';
+}
+function myFrame() { return ui.frame && ownedFrames().some((g) => g.id === ui.frame) ? ui.frame : null; }
 
-function avatarHTML(pid, opts = {}, av = null) {
+function avatarHTML(pid, opts = {}, av = null, fr = null) {
   const cls = ['avatar'];
+  if (fr) cls.push('framed');
   if (opts.active) cls.push('active');
   if (opts.small) cls.push('small');
-  return `<div class="${cls.join(' ')}">${(av && avatarInner(av)) || BANANA_FACE}${opts.ring ? `<i class="ring" id="ring-${pid}"></i>` : ''}</div>`;
+  return `<div class="${cls.join(' ')}">${(av && avatarInner(av)) || BANANA_FACE}${frameHTML(fr)}${opts.ring ? `<i class="ring" id="ring-${pid}"></i>` : ''}</div>`;
 }
 
 function renderLobby() {
@@ -544,7 +602,7 @@ function renderLobby() {
     if (!p) {
       list.push(`<div class="seat-row empty"><div class="avatar" style="opacity:.4"></div><span class="nm">مكان فاضي</span>${team ? `<span class="ribbon">${team}</span>` : ''}${isHost ? `<button class="mini-btn" data-lobby="bot" data-i="${i}">+ روبوت</button>` : ''}</div>`);
     } else {
-      list.push(`<div class="seat-row">${avatarHTML('l' + i, {}, p.av)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn" style="background:var(--pink)" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
+      list.push(`<div class="seat-row">${avatarHTML('l' + i, {}, p.av, p.fr)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn" style="background:var(--pink)" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
     }
   }
   const full = L.seats.slice(0, max).filter(Boolean).length === max;
@@ -682,17 +740,21 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: isMe ? i + 1 : 0 })).join('');
   const name = isMe ? 'إنت' : esc(o.name);
   return `<div class="${cls.join(' ')}" data-player="${o.id}">
-    <div class="who">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av)}<span class="ribbon nmr"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
+    <div class="who">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av, o.fr)}<span class="nmr wood ${v.current === o.id ? 'turn' : ''}"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
     <div class="hand" data-hand="${o.id}">${slots || '<span class="ribbon">مفيش كروت</span>'}</div>
   </div>`;
 }
 
 const TABLES = [['wood', 'خشب'], ['purple', 'بنفسجي'], ['blue', 'أزرق'], ['black', 'أسود'], ['green', 'أخضر'], ['teal', 'تركواز'], ['palestine', 'فلسطين']];
-function myTable() { const t = LS.get('table'); return TABLES.some((x) => x[0] === t) ? t : 'wood'; }
+function myTable() {
+  if (ui.tableSel && ownedTables().some((g) => g.id === ui.tableSel)) return ui.tableSel;
+  const t = LS.get('table'); return TABLES.some((x) => x[0] === t) ? t : 'wood';
+}
+const tableSrc = (id) => (giftById(id) ? giftById(id).src : `cards/table-${id}.webp`);
 function tableSheet() {
   const cur = myTable();
   return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>لون الترابيزة</h2><p>اختار اللون اللي يريحك — تقدر تغيّره في أي وقت.</p>
-    <div class="tb-grid">${TABLES.map(([id, nm]) => `<button class="tb-opt ${id === cur ? 'on' : ''}" data-tb="${id}"><span style="background-image:url('cards/table-${id}.webp')"></span><b>${nm}</b></button>`).join('')}</div>
+    <div class="tb-grid">${TABLES.concat(ownedTables().map((g) => [g.id, 'هدية 🎁'])).map(([id, nm]) => `<button class="tb-opt ${id === cur ? 'on' : ''}" data-tb="${id}"><span style="background-image:url('${tableSrc(id)}')"></span><b>${nm}</b></button>`).join('')}</div>
     <button class="plank cream" data-close="1" style="width:100%;margin-top:12px">رجوع</button></div></div>`;
 }
 const PROPS = `<svg class="prop" style="left:22%;top:63%;transform:rotate(-14deg)" width="96" height="62" viewBox="0 0 110 70" aria-hidden="true"><path d="M8 40 C 20 62, 70 66, 100 34 C 104 30, 100 26, 96 28 C 70 48, 36 48, 16 32 C 10 28, 4 34, 8 40 Z" fill="#ffd84d" stroke="#2a1608" stroke-width="4" stroke-linejoin="round"/><path d="M14 22 C 26 44, 72 46, 98 16 C 102 12, 98 8, 94 10 C 70 30, 38 30, 20 14 C 14 10, 10 16, 14 22 Z" fill="#ffe680" stroke="#2a1608" stroke-width="4" stroke-linejoin="round"/><path d="M94 10 l8 -6 M96 28 l8 -4" stroke="#6d4c1d" stroke-width="5" stroke-linecap="round"/></svg>
@@ -723,7 +785,7 @@ function renderGame() {
     if (fromFloor) heldFloor = el; else heldDeck = el;
   }
 
-  $app.innerHTML = `<div class="game" style="background-image:url('cards/table-${myTable()}.webp')${myTable() === 'palestine' ? ';background-position:center' : ''}">
+  $app.innerHTML = `<div class="game" style="background-image:url('${tableSrc(myTable())}')${myTable() === 'palestine' || giftById(myTable()) ? ';background-position:center' : ''}">
   <div class="topbar">
     <span class="round-chip wood">الجولة ${v.round}/5${typeChip ? `<small>${typeChip}</small>` : ''}</span>
     <span class="row">
@@ -823,7 +885,7 @@ function sheetHTML() {
   if (ui.sheet === 'rules-mini') {
     return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>الكروت</h2><div class="glossary">${Object.keys(CARD_INFO).map((n) => `<div>${cardSVG(n)}</div>`).join('')}</div><button class="plank cream" data-close="1" style="width:100%;margin-top:10px">رجوع</button></div></div>`;
   }
-  if (v.over || (p && p.kind === 'gameOver') || ui.gameOver) return gameOverSheet();
+  if (ui.gameOver || ((v.over || (p && p.kind === 'gameOver')) && !updQ.length)) return gameOverSheet();
   if (ui.lastRoundEnd && (v.waitingKind === 'roundOver')) return roundSheet();
   if (!p) return '';
   if (ui.sel.mode === 'gr1' && p.kind === 'turn') {
@@ -841,12 +903,15 @@ function sheetHTML() {
     return `<div class="hold-show">${p.cards.map((c, i) => `<div class="float-card small ${ui.sel.extraIdx === i ? 'sel' : ''}" data-extra="${i}" role="button" tabindex="0">${cardSVG(c.name)}</div>`).join('')}</div>`;
   }
   if (p.kind === 'guard' && ui.sel.mode !== 'guard') {
-    return `<div class="sheet-bg"><div class="sheet">
-      <h2>${esc(pname(p.by))} هيعمل عليك ${cardName(p.card)}</h2>
-      <div class="float-wrap"><div class="float-card">${cardSVG(p.card)}</div></div>
-      <p><b>الكارت ده بيعمل إيه:</b> ${esc(CARD_DESC[p.card] || '')}</p>
-      <p>تقدر تمنعه لو معاك <b>Guard</b> في كروتك: دوس "آه" وبعدين اضغط على كارت الـ Guard. لو كشفت كارت غلط هتلبس كارت زيادة والأمر هيتنفذ برضه.</p>
-      <div class="row"><button class="plank cream" data-a="noGuard">مش معايا — كمّل</button><button class="plank" style="background:var(--pink);color:#fff;box-shadow:0 6px 0 var(--ink)" data-ui="guard-mode">معايا Guard</button></div>
+    // Same box as the announcement, with the Guard question under it.
+    const name = p.option ? `${OPTION_AR[p.option][0]} من Choose` : cardName(p.card);
+    const desc = p.option ? CHOSE_AR[p.option][1] : (CARD_DESC[p.card] || '');
+    return `<div class="sheet-bg guardbox-bg"><div class="announce hot guardbox">
+      <div class="a-card">${cardSVG(p.card)}</div>
+      <div class="a-title">${esc(pname(p.by))} هينفذ ${name}${p.viaCopy ? ' بـ Copy' : ''} عليك!</div>
+      <div class="a-desc">${esc(desc)}</div>
+      <div class="gb-q">معاك <b>Guard</b> توقفه؟ <small>لو كشفت كارت غلط هتلبس كارت والأمر هيتنفذ</small></div>
+      <div class="gb-row"><button class="plank cream" data-a="noGuard">لا — كمّل</button><button class="plank" style="background:var(--pink);color:#fff" data-ui="guard-mode">آه، أوقفه</button></div>
     </div></div>`;
   }
   if (p.kind === 'delegate') {
@@ -890,12 +955,31 @@ function boardWrap(title, body, { close = false, sub = '' } = {}) {
 
 function teamTag(v, p) { return v.mode === 'team' ? `<span class="ribbon ${p.team === 0 ? 'sky' : 'pink'}">${p.team === 0 ? 'فريق أ' : 'فريق ب'}</span>` : ''; }
 
+// One player's whole game: score and cards of every round.
+function playerRounds(p) {
+  const v = ui.view;
+  const hands = p.roundHands || [];
+  const rows = p.roundScores.map((sc, r) => {
+    const h = hands[r] || {};
+    const label = r < 5 ? `الجولة ${RN[r]}${r === 3 ? ' (×٢)' : r === 4 ? ' (عمياني)' : ''}` : 'جولة فاصلة';
+    return `<div class="pr-row ${h.win ? 'win' : ''}">
+      <div class="pr-top"><b>${label}</b>${h.win ? '<span class="chip gold">كسب 👑</span>' : ''}<span class="chip">كروته <b>${h.sum ?? '·'}</b></span><span class="chip dark">السكور <b>${sc}</b></span></div>
+      ${h.slots ? miniHand(h.slots) : ''}
+    </div>`;
+  }).join('') || '<p class="wb-hint">لسه مفيش جولات خلصت</p>';
+  return `<div class="pr-head">${avatarHTML(p.id, {}, p.av, p.fr)}<div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}</div><span class="chip dark">المجموع <b>${p.total}</b></span></div>
+    <div class="pr-list">${rows}</div>
+    <button class="plank cream" data-ph="">رجوع للسكور</button>`;
+}
+
 function scoresSheet() {
   const v = ui.view;
+  const sel = ui.scorePid && v.players.find((x) => x.id === ui.scorePid);
+  if (sel) return boardWrap('السكور', playerRounds(sel), { close: true });
   const head = `<tr><th></th>${RN.map((r, i) => `<th>${r}${i === 3 ? '<small>×٢</small>' : ''}</th>`).join('')}<th>المجموع</th></tr>`;
-  const rows = v.players.map((p) => `<tr><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span></div></td>${[0, 1, 2, 3, 4].map((r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
+  const rows = v.players.map((p) => `<tr class="tap" data-ph="${p.id}"><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av, p.fr)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span><i class="more">‹</i></div></td>${[0, 1, 2, 3, 4].map((r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
   return boardWrap('السكور', `<div class="parch"><table class="wb-table">${head}${rows}</table></div>
-    <p class="wb-hint">الأقل نقط هو الأحسن 🍌</p>
+    <p class="wb-hint">دوس على أي لاعب تشوف كروته في كل جولة 🍌</p>
     <button class="plank cream" data-close="1">رجوع</button>`, { close: true });
 }
 
@@ -911,7 +995,7 @@ function roundSheet() {
     const u = v.mode === 'team' ? p.team : i;
     const win = e.wins[u];
     return `<div class="rs-row ${win ? 'win' : ''}">
-      <div class="rs-top">${avatarHTML(p.id, {}, p.av)}${win ? '<span class="crown">👑</span>' : ''}
+      <div class="rs-top">${avatarHTML(p.id, {}, p.av, p.fr)}${win ? '<span class="crown">👑</span>' : ''}
         <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}</div>
         <div class="rs-nums"><span class="chip">كروته <b>${d.sum}</b></span><span class="chip ${win ? 'gold' : ''}">${win ? 'كسب الجولة' : 'السكور'} <b>${e.scores[u]}</b></span><span class="chip dark">المجموع <b>${p.total}</b></span></div>
       </div>
@@ -934,14 +1018,17 @@ function gameOverSheet() {
   const rows = ranked.map((p, k) => {
     if (k > 0 && p.total !== ranked[k - 1].total) rank = k;
     const w = winners.includes(p.id);
-    return `<div class="go-row ${w ? 'win' : ''}"><span class="medal">${medal[rank]}</span>${avatarHTML(p.id, {}, p.av)}
+    return `<div class="go-row tap ${w ? 'win' : ''}" data-ph="${p.id}"><span class="medal">${medal[rank]}</span>${avatarHTML(p.id, {}, p.av, p.fr)}
       <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}<div class="go-rounds">${p.roundScores.map((x, r) => `<i title="الجولة ${r + 1}">${x}</i>`).join('')}</div></div>
       <span class="chip ${w ? 'gold' : 'dark'}"><b>${p.total}</b></span></div>`;
   }).join('');
   const champ = winners.map((w) => esc(w === ui.me ? 'إنت' : pname(w))).join(' و');
+  const sel = ui.scorePid && v.players.find((x) => x.id === ui.scorePid);
+  if (sel) return boardWrap(iWon ? 'كسبت! 🍌👑' : 'خلصت اللعبة!', playerRounds(sel));
   return boardWrap(iWon ? 'كسبت! 🍌👑' : 'خلصت اللعبة!', `
-    <div class="go-champ">${winners.slice(0, 2).map((w) => { const p = v.players.find((x) => x.id === w); return p ? avatarHTML(p.id, {}, p.av) : ''; }).join('')}<div>بطل البنانا: <b>${champ}</b></div></div>
+    <div class="go-champ">${winners.slice(0, 2).map((w) => { const p = v.players.find((x) => x.id === w); return p ? avatarHTML(p.id, {}, p.av, p.fr) : ''; }).join('')}<div>بطل البنانا: <b>${champ}</b></div></div>
     <div class="go-list">${rows}</div>
+    <p class="wb-hint">دوس على أي لاعب تشوف كروته في كل جولة</p>
     <div class="row">
       ${ui.conn && ui.conn.local ? '<button class="plank gold" data-ui="again">العب تاني</button>' : ''}
       <button class="plank cream" data-ui="leave">الرئيسية</button>
@@ -1002,14 +1089,49 @@ function onSlotTap(slotId, owner) {
   }
 }
 
+// Touching the monkeys or the logo on the home screen (and the secret code).
+$app.addEventListener('pointerdown', (ev) => {
+  const t = ev.target.closest('[data-mk]');
+  if (!t || !t.dataset.mk || ui.screen !== 'home' || ui.sheet) return;
+  onSecretTap($app, t.dataset.mk, (gift) => {
+    // the gift becomes yours right away (you can still change it)
+    if (gift.kind === 'frame') ui.frame = gift.id;
+    if (gift.kind === 'table') ui.tableSel = gift.id;
+    if (gift.kind === 'avatar') ui.avSel = gift.id;
+    ui.gift = gift; ui.sheet = 'gift'; render();
+  }, () => { ui.sheet = 'owner'; ui.sheetAt = Date.now(); ui.gift = null; render(); setTimeout(() => { const i = document.getElementById('pin'); if (i) i.focus(); }, 50); });
+});
+
+function giftSheet() {
+  const g = ui.gift;
+  let body;
+  if (ui.ownerWelcome) body = '<p class="gift-title">أهلاً بيك يا صاحب اللعبة 👑</p><p>كل الهدايا اتفتحتلك: الإطارات في صورتك، والترابيزات في لون الترابيزة.</p>';
+  else if (g) {
+    const prev = g.kind === 'frame' ? `<div class="avatar framed gift-av">${avatarInner(myAvatar())}${frameHTML(g.id)}</div>`
+      : g.kind === 'avatar' ? `<div class="avatar gift-av">${avatarInner(g.id)}</div>`
+      : `<div class="gift-table" style="background-image:url('${g.src}')"></div>`;
+    body = `<p class="gift-title">مبروك عليك الهدية دي 🎉</p>${prev}`;
+  } else body = '';
+  return `<div class="sheet-bg wbg" data-close="1"><div class="woodboard pop">
+    <div class="wb-title">🎁 هدية!</div>
+    <div class="wb-body"><div class="parch gift-body">${body}</div><button class="plank gold" data-close="1">تمام</button></div></div></div>`;
+}
+
+function ownerSheet() {
+  return `<div class="sheet-bg wbg" data-close="1"><div class="woodboard pop">
+    <div class="wb-title">🔒</div>
+    <div class="wb-body"><div class="parch gift-body"><input id="pin" class="pin" type="password" inputmode="numeric" autocomplete="off" maxlength="12" aria-label="الرقم"></div>
+    <button class="plank gold" data-pin="1">تمام</button></div></div></div>`;
+}
+
 $app.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
+  const t = ev.target.closest('[data-fr],[data-pin],[data-ph],[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
   if (!t) return;
   const d = t.dataset;
   const nm = document.getElementById('nm');
   if (nm) { ui.name = nm.value.trim().slice(0, 14); LS.set('name', ui.name); }
-  if (d.close && ev.target === t) { ui.sheet = null; return render(); }
-  if (d.close) { if (t.tagName === 'BUTTON') { ui.sheet = null; render(); } return; }
+  if (d.close && ev.target === t) { if (ui.sheet === 'owner' && Date.now() - (ui.sheetAt || 0) < 800) return; ui.sheet = null; ui.ownerWelcome = false; return render(); }
+  if (d.close) { if (t.tagName === 'BUTTON') { ui.sheet = null; ui.ownerWelcome = false; render(); } return; }
   if (d.lp != null) { ui.learnPage = +d.lp; return render(); }
   if (d.go === 'rules') ui.learnPage = 0;
   if (d.go) { ui.error = ''; ui.screen = d.go; return render(); }
@@ -1026,9 +1148,16 @@ $app.addEventListener('click', (ev) => {
     return Net.joinRoom(netCtx(), code);
   }
   if (d.lobby) return ui.lobby && ui.lobby.handle(d.lobby, +d.i);
-  if (d.tb) { LS.set('table', d.tb); return render(); }
-  if (d.av) { LS.set('avatar', d.av); ui.sheet = null; return render(); }
-  if (d.sheet) { if (d.sheet === 'learn') ui.learnPage = 0; ui.sheet = d.sheet; return render(); }
+  if (d.pin) {
+    const v = (document.getElementById('pin') || {}).value || '';
+    if (unlockAll(v)) { ui.ownerWelcome = true; ui.sheet = 'gift'; } else ui.sheet = null;
+    return render();
+  }
+  if (d.ph != null) { ui.scorePid = d.ph || null; return render(); }
+  if (d.tb) { if (giftById(d.tb)) ui.tableSel = d.tb; else { ui.tableSel = null; LS.set('table', d.tb); } return render(); }
+  if (d.av) { if (/^g\d$/.test(d.av)) ui.avSel = d.av; else { ui.avSel = null; LS.set('avatar', d.av); } ui.sheet = null; return render(); }
+  if (d.fr != null) { ui.frame = d.fr || null; return render(); }
+  if (d.sheet) { ui.scorePid = null; if (d.sheet === 'learn') ui.learnPage = 0; ui.sheet = d.sheet; return render(); }
   if (d.a) {
     if (d.a === 'next') ui.lastRoundEnd = null;
     return send({ t: d.a });
@@ -1064,6 +1193,7 @@ function netCtx() {
   return {
     name: () => ui.name || 'لاعب',
     avatar: () => myAvatar(),
+    frame: () => myFrame(),
     setup: () => ui.setup,
     showLobby(lobby) { ui.lobby = lobby; ui.screen = 'lobby'; ui.error = ''; render(); },
     lobbyChanged() { if (ui.screen === 'lobby') render(); },

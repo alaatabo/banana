@@ -691,3 +691,15 @@ test('team: partner snaps wrong on my thrown Plus → he takes the card under it
   assert.equal(st.pending.kind, 'delegate', 'the Plus is still played');
   checkInvariants(st);
 });
+
+test('copy: a command card that only landed on the floor (not played) counts as the last command', () => {
+  // p0 keeps a drawn card, dropping a Freeze from his hand onto the floor unplayed; p1 then plays copy → freeze
+  const st = setup({ hands: { p0: ['freeze', 'n1', 'n2', 'n3'] }, deckTop: ['n5', 'copy'], discard: ['n4'] });
+  st.lastActivated = 'swap'; st.lastActAt = ++st.clock;
+  act(st, 'p0', { t: 'draw' });
+  act(st, 'p0', { t: 'keep', slotId: slots(st, 'p0')[0].id });
+  assert.equal(top(st), 'freeze');
+  act(st, 'p1', { t: 'draw' }); act(st, 'p1', { t: 'throw' });
+  assert.equal(st.pending.kind, 'target');
+  assert.equal(st.pending.task.name, 'freeze', 'copy repeats the freeze that landed on the floor');
+});
