@@ -509,6 +509,9 @@ test('tie after round 5 (forced) → tiebreak', () => {
 test('team: owner and partner choose who runs the effect; conflict → owner', () => {
   let st = setup({ mode: 'team', deckTop: ['n7'], discard: ['n4'] });
   act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' });
+  assert.equal(st.pending.kind, 'snapWindow', 'partner may snap before the power is played');
+  assert.equal(st.pending.pid, 'p2');
+  act(st, 'p2', { t: 'pass' });
   assert.equal(st.pending.kind, 'delegate');
   act(st, 'p0', { t: 'delegate', who: 'p2' });
   act(st, 'p2', { t: 'delegate', who: 'p2' });
@@ -518,7 +521,7 @@ test('team: owner and partner choose who runs the effect; conflict → owner', (
   assert.ok(['p1', 'p0'].includes(st.current) || st.pending.kind === 'snapWindow');
 
   st = setup({ mode: 'team', deckTop: ['n7'], discard: ['n4'] });
-  act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' });
+  act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' }); act(st, 'p2', { t: 'pass' });
   act(st, 'p0', { t: 'delegate', who: 'p2' });
   act(st, 'p2', { t: 'delegate', who: 'p0' });
   assert.equal(st.pending.pid, 'p0');
@@ -655,4 +658,36 @@ test('refuse your own drawn command with a guard; wrong card = take the card und
   st = setup({ hands: { p0: ['guard', 'n1', 'n2', 'n3'] }, deckTop: ['n7'], discard: ['n4'] });
   act(st, 'p0', { t: 'draw' });
   rejects(() => act(st, 'p0', { t: 'throwGuard', slotId: slots(st, 'p0')[0].id }), 'numbers cannot be refused');
+});
+
+test('team: partner snaps on each thrown card before its power, and again on a Freeze that just ended', () => {
+  // partner holds a 5: I throw a 5 → partner snaps it before the power is played
+  let st = setup({ mode: 'team', hands: { p2: ['n5', 'n1', 'n2', 'n3'] }, deckTop: ['n5'], discard: ['n4'] });
+  act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' });
+  assert.equal(st.pending.kind, 'snapWindow');
+  act(st, 'p2', { t: 'snap', slotId: slots(st, 'p2')[0].id });
+  assert.deepEqual(names(st, 'p2'), ['n1', 'n2', 'n3']);
+  if (st.pending.kind === 'snapWindow') act(st, st.pending.pid, { t: 'pass' });
+  assert.equal(st.pending.kind, 'delegate', 'then the power of my 5');
+  checkInvariants(st);
+
+  // a thrown Guard takes a Plus off my own slot
+  st = setup({ hands: { p0: ['n1', 'n2', 'n3', 'n4'] }, deckTop: ['guard'], discard: ['n9'] });
+  const s0 = slots(st, 'p0')[0]; s0.plus = 1; s0.plusCards = [st.discard.shift()];
+  act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' });
+  assert.equal(st.pending.kind, 'target');
+  act(st, 'p0', { slotId: s0.id, what: 'plus' });
+  assert.equal(slots(st, 'p0')[0].plus, 0);
+  checkInvariants(st);
+});
+
+test('team: partner snaps wrong on my thrown Plus → he takes the card under it, the Plus still runs', () => {
+  const st = setup({ mode: 'team', hands: { p2: ['n9', 'n1', 'n2', 'n3'] }, deckTop: ['plus'], discard: ['n4'] });
+  act(st, 'p0', { t: 'draw' }); act(st, 'p0', { t: 'throw' });
+  assert.equal(st.pending.kind, 'snapWindow');
+  act(st, 'p2', { t: 'snap', slotId: slots(st, 'p2')[0].id });
+  assert.deepEqual(names(st, 'p2'), ['n9', 'n1', 'n2', 'n3', 'n4'], 'took the card under the Plus');
+  assert.equal(top(st), 'plus');
+  assert.equal(st.pending.kind, 'delegate', 'the Plus is still played');
+  checkInvariants(st);
 });

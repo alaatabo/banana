@@ -70,7 +70,7 @@ function banana({ mood = 'happy', prop = '', tint = '#ffd84d' } = {}) {
 
 const PROPS = {
   golden: '<path d="M40 40 l4 -9 l6 6 l6 -6 l4 9 z" fill="#ffca28" stroke="#8a6400" stroke-width="1.2"/>',
-  guard: '<path d="M64 62 c0 -6 6 -8 12 -8 c6 0 12 2 12 8 c0 12 -8 18 -12 20 c-4 -2 -12 -8 -12 -20z" fill="#d81b60" stroke="#fff" stroke-width="2"/><path d="M76 58 v16 M70 66 h12" stroke="#fff" stroke-width="2"/>',
+  guard: 'لو اترمى من الكومة: يشيل +5 أو التجميد من خانة عندك. ولو معاك: يمنع أي أمر حد بيعمله عليك، أو ترفض بيه أمر سحبته، أو في دورك تشيل بيه +5 أو تجميد — ولو كشفت كارت غلط بتلبس كارت زيادة',
   freeze: '<rect x="26" y="40" width="48" height="62" rx="8" fill="#b3e5fc" opacity=".55" stroke="#e1f5fe" stroke-width="2"/><path d="M80 40 v14 M73 47 h14 M75 42 l10 10 M85 42 l-10 10" stroke="#e1f5fe" stroke-width="2"/>',
   tornado: '<path d="M64 40 h22 M66 48 h18 M69 56 h12 M72 64 h7 M74 72 h3" stroke="#cfd8dc" stroke-width="3" stroke-linecap="round"/>',
   plus: '<circle cx="78" cy="56" r="11" fill="#ffd54f"/><text x="78" y="61" font-size="13" font-weight="900" text-anchor="middle" fill="#223a63">+5</text>',

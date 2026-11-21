@@ -287,7 +287,9 @@ const TASKS = {
       }
       const tasks = [];
       const mate = partnerOf(state, p.id);
-      if (mate && !hasNoCards(mate) && state.discard.length) tasks.push({ k: 'snapWindow', pid: mate.id, other: p.id });
+      // Partner gets a window for the floor card only if it's a new one
+      // (e.g. a Freeze that just ended, or the card you swapped out).
+      if (mate && !hasNoCards(mate) && state.discard.length && topDiscard(state) !== state.turnCtx.offeredTop) tasks.push({ k: 'snapWindow', pid: mate.id, other: p.id });
       tasks.push({ k: 'afterTurn' });
       schedule(state, ...tasks);
     },
@@ -320,7 +322,8 @@ const TASKS = {
 
     effect(state, t) {
       const name = nameOf(state, t.trigger);
-      if (name === 'guard') { emit(state, { type: 'noEffect', to: 'all', card: 'guard' }); return; }
+      // A partner's wrong snap can take the thrown card off the floor; then its power is lost.
+      if (!state.discard.includes(t.trigger)) { emit(state, { type: 'noEffect', to: 'all', card: name, taken: true }); return; }
       if (state.mode === 'team') {
         const mate = partnerOf(state, t.owner);
         setPending(state, { kind: 'delegate', pids: [t.owner, mate.id], owner: t.owner, answers: {}, card: name, trigger: t.trigger });
@@ -334,6 +337,7 @@ const TASKS = {
     snapWindow(state, t) {
       const p = player(state, t.pid);
       if (hasNoCards(p) || !state.discard.length) return;
+      state.turnCtx.offeredTop = topDiscard(state);
       setPending(state, { kind: 'snapWindow', pid: t.pid, other: t.other, top: nameOf(state, topDiscard(state)) });
     },
 
@@ -437,6 +441,16 @@ function execEffect(state, t) {
       }
       if (!opts.length) return;
       return pendTarget(state, { ...t, step: 'clear' }, { type: 'clear', options: opts });
+    }
+    case 'guard': {
+      // A thrown Guard takes one Plus or the Freeze off one of your own slots.
+      const opts = [];
+      for (const s of me.slots) {
+        if (s.plus > 0 && !s.freeze) opts.push({ slotId: s.id, what: 'plus' });
+        if (s.freeze) opts.push({ slotId: s.id, what: 'freeze' });
+      }
+      if (!opts.length) { emit(state, { type: 'noEffect', to: 'all', card: 'guard' }); return; }
+      return pendTarget(state, { ...t, step: 'guardFix' }, { type: 'clear', options: opts });
     }
     case 'copy': {
       const last = state.lastActivated;
@@ -594,7 +608,7 @@ function resolveTarget(state, pend, a) {
       schedule(state, check(a.target, { k: 'apply', what: 'buzz', target: a.target, trigger: t.trigger }));
       return;
     }
-    case 'clear': {
+    case 'clear': case 'guardFix': {
       const o = spec.options.find((x) => x.slotId === a.slotId && x.what === a.what);
       if (!o) fail('bad clear');
       const f = findSlot(state, a.slotId);
@@ -611,8 +625,8 @@ function resolveTarget(state, pend, a) {
         state.discard.push(f.s.freeze.card);
         f.s.freeze = null;
       }
-      emit(state, { type: 'cleared', to: 'all', pid: exec, slotId: a.slotId, what: a.what });
-      done(state, { name: 'clear' });
+      emit(state, { type: 'cleared', to: 'all', pid: exec, slotId: a.slotId, what: a.what, card: t.step === 'clear' ? 'clear' : 'guard' });
+      done(state, { name: t.step === 'clear' ? 'clear' : 'guard' });
       return;
     }
     case 'curse': {
@@ -898,6 +912,15 @@ function keepCard(state, p, slotId, cardId, from = 'deck') {
   }
 }
 
+// Team mode: whenever a new card lands on the floor during your turn, your
+// partner may snap on it right away — before any power on it is played.
+function mateSnap(state, pid) {
+  if (state.mode !== 'team') return null;
+  const mate = partnerOf(state, pid);
+  if (!mate || hasNoCards(mate) || !state.discard.length) return null;
+  return { k: 'snapWindow', pid: mate.id, other: pid, offer: topDiscard(state) };
+}
+
 function throwCard(state, p, cardId, withEffect) {
   state.limbo.splice(state.limbo.indexOf(cardId), 1);
   state.discard.push(cardId);
@@ -917,7 +940,7 @@ function holdAction(state, pid, a, pend) {
     if (pend.from !== 'deck') fail('a card taken from the floor must be kept');
     state.pending = null;
     const eff = throwCard(state, p, pend.card, true);
-    schedule(state, eff, { k: 'endTurn', pid });
+    schedule(state, mateSnap(state, pid), eff, { k: 'endTurn', pid });
   } else if (a.t === 'throwGuard') {
     // Refuse your own drawn command: throw it and show a Guard from your cards.
     // Right guard: command cancelled, guard goes to the floor too.
@@ -958,11 +981,11 @@ function extraAction(state, pid, a, pend) {
     const rest = ctx.cards.filter((_, k) => k !== a.i);
     if (a.t === 'keep') {
       try { keepCard(state, p, a.slotId, cardId); } catch (e) { state.pending = pend; throw e; }
-      schedule(state, { k: 'extraContinue', pid, ctx: { ...ctx, cards: rest } });
+      schedule(state, mateSnap(state, pid), { k: 'extraContinue', pid, ctx: { ...ctx, cards: rest } });
     } else {
       const eff = throwCard(state, p, cardId, true);
       // A thrown effect resolves first (a thrown "extra" opens its own 2-card hand).
-      schedule(state, eff, { k: 'extraContinue', pid, ctx: { ...ctx, cards: rest } });
+      schedule(state, mateSnap(state, pid), eff, { k: 'extraContinue', pid, ctx: { ...ctx, cards: rest } });
     }
     return;
   }
@@ -1004,9 +1027,14 @@ function doSnap(state, pid, slotId) {
     return true;
   }
   emit(state, { type: 'reveal', to: 'all', dur: REVEAL_MS, items: [{ owner: pid, slotId, card: mine }] });
-  state.discard.pop();
-  const ns = giveCard(state, p, top);
-  emit(state, { type: 'snap', to: 'all', pid, card: mine, ok: false, slotId, penalty: want, newSlot: ns.id });
+  // Penalty is the floor card. But if that card is a power still waiting to be
+  // played, it stays (the power runs as usual) and the card under it is taken.
+  const waiting = state.stack.some((x) => x.k === 'effect' && x.trigger === top);
+  const i = waiting ? state.discard.length - 2 : state.discard.length - 1;
+  if (i < 0) { emit(state, { type: 'snap', to: 'all', pid, card: mine, ok: false, slotId, penalty: null }); return false; }
+  const pen = state.discard.splice(i, 1)[0];
+  const ns = giveCard(state, p, pen);
+  emit(state, { type: 'snap', to: 'all', pid, card: mine, ok: false, slotId, penalty: nameOf(state, pen), newSlot: ns.id, under: waiting });
   return false;
 }
 
