@@ -8,9 +8,11 @@ const CODE = ['R', 'logo', 'L', 'R', 'L', 'logo'];
 const OWNER_TAPS = 7;
 const OWNER_PIN = '159753';
 
+import { FRAME_SCALE } from './avatars.js';
+
 export const GIFTS = [
-  ...[1, 2, 3, 4, 5].map((n) => ({ id: 'f' + n, kind: 'frame', src: `gifts/frame${n}.webp` })),
-  ...[1, 2, 3, 4, 5].map((n) => ({ id: 'gt' + n, kind: 'table', src: `gifts/table${n}.webp` })),
+  ...FRAME_SCALE.map((_, i) => ({ id: 'f' + (i + 1), kind: 'frame', src: `gifts/frame${i + 1}.webp` })),
+  ...[1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: 'gt' + n, kind: 'table', src: `gifts/table${n}.webp` })),
   ...[1, 2, 3, 4, 5].map((n) => ({ id: 'g' + n, kind: 'avatar', src: `gifts/av${n}.webp` })),
 ];
 export const giftById = (id) => GIFTS.find((g) => g.id === id);

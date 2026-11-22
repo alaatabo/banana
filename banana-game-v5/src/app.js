@@ -1,5 +1,6 @@
 import { learnHTML, LEARN } from './learn.js';
 import { pickBotNames } from './bot.js';
+import { play as sfx, soundOn, setSound } from './sfx.js';
 import { onSecretTap, unlockAll, ownedFrames, ownedTables, ownedAvatars, giftById } from './secret.js';
 import { AVATAR_IDS, avatarInner, isPlayerAvatar, frameHTML } from './avatars.js';
 import { Host } from './host.js';
@@ -10,7 +11,7 @@ import { isLocalOnly } from './store.js';
 import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
-const APP_DATE = '٢١ نوفمبر ٢٠٢٦';
+const APP_DATE = '٢٢ نوفمبر ٢٠٢٦';
 const APP_V = 22; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -92,7 +93,21 @@ function buzz() { try { navigator.vibrate && navigator.vibrate(40); } catch {} }
 // announcement shows first (3s) and everything that follows waits for it.
 const updQ = [];
 function resetUpdates() { updQ.length = 0; ui.gated = false; ui.pumping = false; ui.gen = (ui.gen || 0) + 1; }
-function onUpdate(view, events) { updQ.push([view, events]); pumpUpdates(); }
+function throwBanana(e) {
+  if (ui.screen !== 'game') return;
+  const from = document.querySelector(`[data-who="${e.from}"] .avatar`);
+  const to = document.querySelector(`[data-who="${e.to}"] .avatar`);
+  sfx('whoosh');
+  FX.bananaThrow(from, to, { onHit: () => sfx('splat') });
+}
+
+function onUpdate(view, events) {
+  // thrown bananas play right away, outside the game's step-by-step queue
+  const emotes = events.filter((e) => e.type === 'emote');
+  if (emotes.length) { emotes.forEach(throwBanana); events = events.filter((e) => e.type !== 'emote'); }
+  if (!events.length && ui.view) return;
+  updQ.push([view, events]); pumpUpdates();
+}
 // What the choose option does, told to everyone after the choice.
 const CHOSE_AR = {
   observe: ['هيبُص على كارت عند كل لاعب', 'هيختار كارت من عند كل لاعب ويبُص عليه لوحده — وكل لاعب يقدر يحمي كارته بـ Guard'],
@@ -130,6 +145,7 @@ function gateOf(e) {
     return { card: 'guard', title: `${by(e.pid)} رفض ${cardName(e.card)} بالـ Guard`, desc: 'الأمر اتلغى، والـ Guard راح الأرض' };
   }
   // End of a round / the game: let the last move finish and be seen first.
+  if (e.type === 'banana') return { after: /[?&]fast/.test(location.search) ? 200 : 2400 };
   if (e.type === 'roundEnd' || e.type === 'gameOver') return { pause: /[?&]fast/.test(location.search) ? 200 : 1600 };
   return null;
 }
@@ -164,6 +180,7 @@ async function pumpUpdates() {
         applyUpdate(view, rest.slice(0, k + 1));
         await fxIdle();
         if (gen !== ui.gen) return;
+        if (g.after) { await FX.wait(g.after); if (gen !== ui.gen) return; rest = rest.slice(k + 1); continue; }
         await announce(g.card, g.title, g.hot, g.desc);
         if (gen !== ui.gen) return;
         rest = rest.slice(k + 1);
@@ -188,7 +205,7 @@ function applyUpdate(view, events) {
   for (const e of events) handleEvent(e);
   const key = view.pending ? JSON.stringify([view.pending.kind, view.pending.step, view.pending.card, view.pending.spec, view.pending.cards && view.pending.cards.length]) : '';
   if (key !== ui.selKey) { ui.selKey = key; ui.sel = {}; }
-  if (!wasMyTurn && view.pending && view.pending.kind === 'turn') buzz();
+  if (!wasMyTurn && view.pending && view.pending.kind === 'turn') { buzz(); sfx('turn'); }
   if (view.pending && ['guard', 'snapWindow', 'delegate'].includes(view.pending.kind)) buzz();
   // Hide cards that are about to fly in, so they land instead of popping up.
   if (before) planGhosts(events);
@@ -365,7 +382,29 @@ function animate(events, B, A, oldView) {
   }
 }
 
+const FX_CARD = { freeze: 'freeze', plus: 'plus', golden: 'golden', tornado: 'tornado' };
+function soundFor(e) {
+  switch (e.type) {
+    case 'drewHidden': case 'took': return sfx('draw');
+    case 'discarded': case 'filled': case 'gave': case 'cleared': case 'markerOff': return sfx('place');
+    case 'replaced': case 'swapped': return sfx('swap');
+    case 'snap': return sfx(e.ok ? 'snapOk' : 'snapBad');
+    case 'shuffled': case 'reshuffle': return sfx('shuffle');
+    case 'tornado': return sfx('tornado');
+    case 'roundStart': return sfx('deal');
+    case 'reveal': case 'peeked': return sfx('flip');
+    case 'effect': return sfx(FX_CARD[e.card] || 'magic');
+    case 'targeted': if ((e.targets || [e.target]).includes(ui.me) && e.by !== ui.me) sfx('alert'); return;
+    case 'guarded': if (e.ok) sfx('guard'); return;
+    case 'guardUsed': if (e.ok) sfx('guard'); return;
+    case 'banana': return sfx('banana');
+    case 'roundEnd': return sfx('drum');
+    case 'gameOver': return sfx((e.winners || []).includes(ui.me) ? 'win' : 'lose');
+  }
+}
+
 function handleEvent(e) {
+  soundFor(e);
   const n = (pid) => pname(pid);
   const now = Date.now();
   switch (e.type) {
@@ -392,7 +431,7 @@ function handleEvent(e) {
     case 'discarded': if (!e.timeout) log(e.replaced ? `${n(e.pid)} بدّل ورمى ${cardName(e.card)}` : `${n(e.pid)} رمى ${cardName(e.card)}`); else log(`${n(e.pid)} خلص وقته`); break;
     case 'took': log(`${n(e.pid)} خد ${cardName(e.card)} من الأرض`); ui.heldPublic = { pid: e.pid, card: e.card }; break;
     case 'snap': log(e.ok ? `${n(e.pid)} بصّر ${cardName(e.card)} ✓` : e.penalty ? `${n(e.pid)} بصّر غلط (${cardName(e.card)}) ولبس ${cardName(e.penalty)}${e.under ? ' اللي كان تحت الأمر' : ''}` : `${n(e.pid)} بصّر غلط (${cardName(e.card)})`); break;
-    case 'banana': banner('بانانا!', 1500); log(`${n(e.pid)} قال بانانا — كل واحد ليه دور أخير`); break;
+    case 'banana': ui.bananaCall = { pid: e.pid, at: Date.now() }; setTimeout(() => { if (ui.bananaCall && Date.now() - ui.bananaCall.at >= 2300) { ui.bananaCall = null; render(); } }, 2400); log(`${n(e.pid)} قال بانانا — كل واحد ليه دور أخير`); break;
     case 'effect': if (CARD_INFO[e.card].tier === 'cmd') log(`${n(e.pid)} شغّل ${cardName(e.card)}${e.viaCopy ? ' (Copy)' : ''}`); break;
     case 'gave': log(`${n(e.pid)} لبس ${cardName(e.card)}`); break;
     case 'swapped': log(`اتبدل كارت بين ${n(e.pa)} و${n(e.pb)}`); break;
@@ -452,7 +491,7 @@ function startBots() {
 function leaveGame() {
   const c = ui.conn;
   ui.conn = null;
-  if (c) c.leave(); resetUpdates(); ui.view = null; ui.screen = 'home'; ui.sheet = null; ui.lobby = null;
+  if (c) c.leave(); resetUpdates(); ui.inviteCode = null; ui.view = null; ui.screen = 'home'; ui.sheet = null; ui.lobby = null;
   render();
 }
 
@@ -527,7 +566,8 @@ function renderHome() {
     <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
     <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
     <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>
-    <div class="ver">آخر تحديث: ${APP_DATE}</div>`, { photo: true, cls: 'home' });
+    <div class="ver">آخر تحديث: ${APP_DATE}</div>
+    <button class="round snd-home" data-ui="sound" aria-label="${soundOn() ? 'اقفل الصوت' : 'شغّل الصوت'}">${soundOn() ? '🔊' : '🔇'}</button>`, { photo: true, cls: 'home' });
 }
 
 function renderBotSetup() {
@@ -569,7 +609,8 @@ function renderOnline() {
     <img class="wordmark" src="cards/wordmark.webp" alt="BANANA">
     <button class="plank wood" data-act-ui="create-room" style="min-height:70px;font-size:1.8rem">اعمل أوضة</button>
     <div class="board" style="display:flex;flex-direction:column;gap:10px">
-      <div class="field"><span class="ribbon">أو ادخل بكود أوضة</span><input id="code" inputmode="numeric" maxlength="6" placeholder="مثلاً 4821" aria-label="كود الأوضة"></div>
+      ${ui.inviteCode ? `<div class="field"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name || '')}" placeholder="مثلاً: محمد" aria-label="اسمك"></div>` : ''}
+      <div class="field"><span class="ribbon">${ui.inviteCode ? 'كود الأوضة اللي اتبعتلك' : 'أو ادخل بكود أوضة'}</span><input id="code" inputmode="numeric" maxlength="6" placeholder="مثلاً 4821" aria-label="كود الأوضة" value="${esc(ui.inviteCode || '')}"></div>
       <button class="plank teal" data-act-ui="join-room">ادخل</button>
     </div>
     ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}`);
@@ -640,7 +681,7 @@ function slotHTML(s, owner, opts = {}) {
   if (ui.ghost[s.id] > now) cls.push('ghost');
   const face = s.has ? (showing ? cardSVG(rv.card) : backSVG()) : '';
   return `<div class="${cls.join(' ')}" data-slot="${s.id}" data-owner="${owner}" ${opts.pickable ? 'role="button" tabindex="0"' : ''}>
-    ${face}
+    <i class="plk"></i>${face}
     ${(s.markers || []).map((m, i) => `<span class="mk" style="--i:${i}">${cardSVG(m)}</span>`).join('')}
     ${s.freezeCard ? `<span class="mk fz">${cardSVG(s.freezeCard)}<b>${s.frozen}</b></span>` : ''}
     ${s.locked ? '<span class="badge freeze-b">مقفول</span>' : ''}
@@ -737,10 +778,10 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   if (pplayers.has(o.id)) cls.push('pickable');
   if (o.slots.length > 5) cls.push('many');
   const isMe = o.id === ui.me;
-  const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: isMe ? i + 1 : 0 })).join('');
+  const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: i + 1 })).join('');
   const name = isMe ? 'إنت' : esc(o.name);
   return `<div class="${cls.join(' ')}" data-player="${o.id}">
-    <div class="who">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av, o.fr)}<span class="nmr wood ${v.current === o.id ? 'turn' : ''}"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
+    <div class="who" data-who="${o.id}">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av, o.fr)}<span class="nmr wood ${v.current === o.id ? 'turn' : ''}"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
     <div class="hand" data-hand="${o.id}">${slots || '<span class="ribbon">مفيش كروت</span>'}</div>
   </div>`;
 }
@@ -807,6 +848,7 @@ function renderGame() {
   ${v.deadline && v.timed && v.waitingOn.includes(ui.me) ? '<div class="timer-line" id="timer"><i></i></div>' : ''}
   <div class="actions">${actionsHTML()}</div>
   ${ui.peek && ui.peek.until > Date.now() ? `<div class="peek-toast">${cardSVG(ui.peek.card)}</div>` : ''}
+  ${ui.bananaCall ? `<div class="banana-call"><div class="bc-rays"></div><img src="cards/wordmark.webp" alt="بانانا!"><div class="bc-who">${esc(ui.bananaCall.pid === ui.me ? 'إنت قلت بانانا!' : pname(ui.bananaCall.pid) + ' قال بانانا!')}</div><div class="bc-sub">كل واحد ليه دور أخير</div></div>` : ''}
   ${ui.banner ? `<div class="banner"><span class="ink-text">${ui.banner}</span></div>` : ''}
   ${boardOrSheet()}
   </div>`;
@@ -828,7 +870,7 @@ function actionsHTML() {
         <button class="plank wood" data-a="take" ${top && CARD_INFO[top].tier !== 'cmd' ? '' : 'disabled'}>خد من الأرض</button>
         ${snapBtn()}
         ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="gr1">Guard</button>` : ''}
-        ${v.mode === 'solo' ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : `بانانا بعد ${3 - me.turnsPlayed} أدوار`}</button>` : ''}`;
+        ${v.mode === 'solo' ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : v.banana ? 'بانانا اتقالت' : `بانانا بعد ${3 - me.turnsPlayed} ${3 - me.turnsPlayed === 1 ? 'دور' : 'أدوار'}`}</button>` : ''}`;
     }
     case 'hold':
       return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
@@ -872,6 +914,7 @@ function sheetHTML() {
       ${ui.conn && ui.conn.room ? `<div class="room-code"><span>كود الأوضة</span><b>${esc(ui.conn.room)}</b><button class="plank teal" data-ui="share-code">ابعته</button><small>لو حد خرج، يدخل "العب مع صحابك" ويكتب الكود ده ويرجع مكانه</small></div>` : ''}
       <div class="opts">
         <button class="opt" data-sheet="learn"><b>ازاي ألعب؟</b><span>شرح بسيط للعبة خطوة بخطوة</span></button>
+        <button class="opt" data-ui="sound"><b>الأصوات: ${soundOn() ? 'شغالة 🔊' : 'مقفولة 🔇'}</b><span>دوس عشان ${soundOn() ? 'تقفلها' : 'تشغلها'}</span></button>
         <button class="opt" data-sheet="table"><b>لون الترابيزة</b><span>خشب، بنفسجي، أزرق، أسود…</span></button>
         <button class="opt" data-sheet="rules-mini"><b>الكروت</b><span>شوف كل كارت بيعمل إيه</span></button>
         <button class="opt" data-ui="leave"><b>اخرج من الجيم</b><span>${ui.conn && ui.conn.local ? 'الجيم هيتقفل' : ui.conn && ui.conn.isHost ? 'إنت صاحب الأوضة — لو خرجت الجيم هيتقفل للكل' : 'روبوت هيلعب مكانك لحد ما ترجع بالكود'}</span></button>
@@ -1050,6 +1093,8 @@ function startTimerBar() {
       const c = left < 4000 ? '#ff4f8b' : '#ffd84d';
       r.style.background = `conic-gradient(${c} ${f * 360}deg, rgba(42,22,8,.35) 0)`;
     }
+    const sec = Math.ceil(left / 1000);
+    if (left > 0 && sec <= 5 && sec !== ui.lastTick && ui.view.pending) { ui.lastTick = sec; sfx('tick'); }
     if (left > 0) timerRAF = requestAnimationFrame(tick);
   };
   tick();
@@ -1089,17 +1134,32 @@ function onSlotTap(slotId, owner) {
   }
 }
 
+// Double-tap another player's picture in a game: throw a banana at them.
+let lastWhoTap = { id: null, t: 0 };
+$app.addEventListener('pointerdown', (ev) => {
+  if (ui.screen !== 'game' || !ui.conn) return;
+  const w = ev.target.closest('[data-who] .avatar');
+  if (!w) return;
+  const id = w.closest('[data-who]').dataset.who;
+  if (id === ui.me) return;
+  const now = Date.now();
+  if (lastWhoTap.id === id && now - lastWhoTap.t < 400) { lastWhoTap = { id: null, t: 0 }; send({ t: 'emote', kind: 'banana', to: id }); return; }
+  lastWhoTap = { id, t: now };
+});
+
 // Touching the monkeys or the logo on the home screen (and the secret code).
 $app.addEventListener('pointerdown', (ev) => {
   const t = ev.target.closest('[data-mk]');
   if (!t || !t.dataset.mk || ui.screen !== 'home' || ui.sheet) return;
+  sfx(t.dataset.mk === 'logo' ? 'tap' : 'monkey');
   onSecretTap($app, t.dataset.mk, (gift) => {
+    sfx('gift');
     // the gift becomes yours right away (you can still change it)
     if (gift.kind === 'frame') ui.frame = gift.id;
     if (gift.kind === 'table') ui.tableSel = gift.id;
     if (gift.kind === 'avatar') ui.avSel = gift.id;
     ui.gift = gift; ui.sheet = 'gift'; ui.sheetAt = Date.now(); render();
-  }, () => { ui.sheet = 'owner'; ui.sheetAt = Date.now(); ui.gift = null; render(); setTimeout(() => { const i = document.getElementById('pin'); if (i) i.focus(); }, 50); });
+  }, () => { sfx('magic'); ui.sheet = 'owner'; ui.sheetAt = Date.now(); ui.gift = null; render(); setTimeout(() => { const i = document.getElementById('pin'); if (i) i.focus(); }, 50); });
 });
 
 function giftSheet() {
@@ -1128,6 +1188,7 @@ $app.addEventListener('click', (ev) => {
   const t = ev.target.closest('[data-fr],[data-pin],[data-ph],[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
   if (!t) return;
   const d = t.dataset;
+  if (t.tagName === 'BUTTON' && !d.slot) sfx('tap');
   const nm = document.getElementById('nm');
   if (nm) { ui.name = nm.value.trim().slice(0, 14); LS.set('name', ui.name); }
   if (d.close && ev.target === t) { if ((ui.sheet === 'owner' || ui.sheet === 'gift') && Date.now() - (ui.sheetAt || 0) < 800) return; ui.sheet = null; ui.ownerWelcome = false; return render(); }
@@ -1164,7 +1225,8 @@ $app.addEventListener('click', (ev) => {
   }
   if (d.ui === 'snap-mode') { ui.sel = ui.sel.mode === 'snap' ? {} : { ...ui.sel, mode: 'snap' }; return render(); }
   if (d.ui === 'guard-mode') { ui.sel = { mode: 'guard' }; return render(); }
-  if (d.ui === 'share-code') { const c = ui.conn && ui.conn.room; if (c) { const t = `تعالى العب بنانا معايا 🍌 كود الأوضة: ${c}\n${location.href.split('?')[0]}`; if (navigator.share) navigator.share({ text: t }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => { log('الكود اتنسخ'); render(); }).catch(() => {}); } return; }
+  if (d.ui === 'sound') { setSound(!soundOn()); if (soundOn()) sfx('tap'); return render(); }
+  if (d.ui === 'share-code') { const c = ui.conn && ui.conn.room; if (c) { const t = `تعالى نلعب بانانا 🍌\nدوس على اللينك وهتدخل الأوضة على طول:\n${location.origin}${location.pathname}?room=${c}`; if (navigator.share) navigator.share({ text: t }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => { log('الكود اتنسخ'); render(); }).catch(() => {}); } return; }
   if (d.ui === 'selfg') { ui.sel = ui.sel.mode === 'selfg' ? {} : { mode: 'selfg' }; return render(); }
   if (d.ui === 'gr1') { ui.sel = ui.sel.mode === 'gr1' ? {} : { mode: 'gr1' }; return render(); }
   if (d.gr) { const [target, what] = d.gr.split('|'); ui.sel = { mode: 'gr2', target, what }; return render(); }
@@ -1209,7 +1271,17 @@ function netCtx() {
   };
 }
 
+// Invite link (?room=1234): go straight into that room.
+{
+  const m = /[?&]room=(\d{4,6})/.exec(location.search);
+  if (m) {
+    ui.inviteCode = m[1];
+    try { history.replaceState(null, '', location.pathname + location.search.replace(/([?&])room=\d+&?/, '$1').replace(/[?&]$/, '')); } catch {}
+    ui.screen = 'online';
+  }
+}
 render();
+if (ui.inviteCode && ui.name && !(isLocalOnly() && !/localnet/.test(location.search))) Net.joinRoom(netCtx(), ui.inviteCode);
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   // A new version takes over at once; reload so the player sees it (not mid-game).
   const hadController = !!navigator.serviceWorker.controller;

@@ -63,8 +63,12 @@ export class Host {
   push(pid) {
     const cb = this.subs[pid];
     if (!cb) return;
-    const events = eventsFor(this.state, pid, this.seen[pid]);
-    if (events.length) this.seen[pid] = events[events.length - 1].seq;
+    const game = eventsFor(this.state, pid, this.seen[pid]);
+    if (game.length) this.seen[pid] = game[game.length - 1].seq;
+    // fun extras (thrown bananas) ride along with the game events
+    const extra = (this.extra && this.extra[pid]) || [];
+    if (this.extra) this.extra[pid] = [];
+    const events = extra.concat(game);
     const view = viewFor(this.state, pid);
     view.deadline = this.deadline;
     view.timed = this.timed;
@@ -73,6 +77,7 @@ export class Host {
   pushAll() { for (const pid of Object.keys(this.subs)) this.push(pid); }
 
   act(pid, action) {
+    if (action && action.t === 'emote') return this.emote(pid, action);
     try {
       act(this.state, pid, action);
     } catch (e) {
@@ -81,6 +86,20 @@ export class Host {
       return { ok: false, error: 'internal' };
     }
     this.afterChange();
+    return { ok: true };
+  }
+
+  // A banana thrown at another player's face. Not part of the game rules.
+  emote(pid, a) {
+    const to = a && a.to;
+    if (!this.state.players.some((p) => p.id === to) || to === pid) return { ok: false };
+    this.lastEmote = this.lastEmote || {};
+    const now = Date.now();
+    if (now - (this.lastEmote[pid] || 0) < 1200) return { ok: false };
+    this.lastEmote[pid] = now;
+    this.extra = this.extra || {};
+    for (const id of Object.keys(this.subs)) (this.extra[id] = this.extra[id] || []).push({ type: 'emote', kind: 'banana', from: pid, to });
+    this.pushAll();
     return { ok: true };
   }
 

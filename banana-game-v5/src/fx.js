@@ -104,3 +104,45 @@ export function announce({ html, title, desc, hot }) {
   const ms = /[?&]fast/.test(location.search) ? 300 : 3000; // tests run fast
   return new Promise((res) => setTimeout(() => { el.classList.add('out'); setTimeout(() => { el.remove(); res(); }, 250); }, ms));
 }
+
+// A banana thrown from one player's picture into another's face: it spins
+// along an arc, squashes on impact and leaves a splat for a moment.
+export function bananaThrow(fromEl, toEl, { onHit } = {}) {
+  if (!fromEl || !toEl) return;
+  const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
+  const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  const bx = b.left + b.width / 2, by = b.top + b.height / 2;
+  const size = Math.max(44, Math.min(70, b.width * 1.1));
+  const el = document.createElement('img');
+  el.src = 'cards/banana-throw.webp';
+  el.className = 'ban-fly';
+  el.style.width = size + 'px';
+  fxLayer().appendChild(el);
+  const dur = reduce ? 10 : 750;
+  const lift = Math.min(160, Math.hypot(bx - ax, by - ay) * 0.45);
+  const frames = [];
+  for (let i = 0; i <= 12; i++) {
+    const t = i / 12;
+    const x = ax + (bx - ax) * t, y = ay + (by - ay) * t - lift * 4 * t * (1 - t);
+    const sc = 0.7 + 0.5 * Math.sin(Math.PI * t) + 0.2 * t;
+    frames.push({ transform: `translate(${x - size / 2}px, ${y - size / 2}px) rotate(${t * 720}deg) scale(${sc})`, offset: t });
+  }
+  el.animate(frames, { duration: dur, easing: 'cubic-bezier(.35,.1,.6,1)', fill: 'forwards' }).finished.catch(() => {}).then(() => {
+    // squash on the face
+    el.animate([
+      { transform: `translate(${bx - size / 2}px, ${by - size / 2}px) rotate(20deg) scale(1.1)` },
+      { transform: `translate(${bx - size / 2}px, ${by - size / 2 + size * 0.15}px) rotate(20deg) scale(1.7, .45)`, offset: 0.25 },
+      { transform: `translate(${bx - size / 2}px, ${by - size / 2 + size * 0.3}px) rotate(20deg) scale(1.6, .35)`, opacity: 1, offset: 0.8 },
+      { transform: `translate(${bx - size / 2}px, ${by - size / 2 + size * 0.6}px) rotate(20deg) scale(1.5, .3)`, opacity: 0 },
+    ], { duration: 1700, easing: 'ease-out', fill: 'forwards' }).finished.catch(() => {}).then(() => el.remove());
+    const sp = document.createElement('div');
+    sp.className = 'ban-splat';
+    const w = Math.max(b.width, 40) * 1.25;
+    sp.style.cssText = `left:${bx - w / 2}px;top:${by - w / 2}px;width:${w}px;height:${w}px`;
+    sp.innerHTML = `<svg viewBox="0 0 100 100"><path d="M50 14c7 0 9 9 15 9 6 0 11-6 15-2 4 5-3 10 0 15 3 6 12 6 12 13 0 6-9 6-10 12-1 7 7 13 2 18-5 4-11-3-17 0-6 3-6 12-14 12-7 0-8-9-14-11-6-2-13 4-17-1-4-6 3-11 1-17-2-6-12-8-12-14 0-7 10-6 12-12 2-7-5-13 0-17 5-4 11 3 16 0 5-4 4-15 11-15z" fill="#ffe79a" stroke="#c99a1b" stroke-width="2"/><circle cx="18" cy="20" r="4" fill="#ffe79a"/><circle cx="86" cy="84" r="5" fill="#ffe79a"/><circle cx="12" cy="74" r="3" fill="#ffe79a"/><path d="M40 70c0 8 3 18 6 22" stroke="#ffe79a" stroke-width="6" stroke-linecap="round"/></svg>`;
+    fxLayer().appendChild(sp);
+    sp.animate([{ transform: 'scale(.2)', opacity: 0 }, { transform: 'scale(1.1)', opacity: 1, offset: 0.12 }, { transform: 'scale(1)', opacity: 1, offset: 0.2 }, { transform: 'scale(1) translateY(6px)', opacity: 1, offset: 0.8 }, { transform: 'scale(1) translateY(14px)', opacity: 0 }], { duration: 2000, fill: 'forwards' }).finished.catch(() => {}).then(() => sp.remove());
+    toEl.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-5px) rotate(-6deg)' }, { transform: 'translateX(5px) rotate(5deg)' }, { transform: 'translateX(-3px)' }, { transform: 'translateX(0)' }], { duration: 400 });
+    if (onHit) onHit();
+  });
+}

@@ -35,8 +35,8 @@ const seatsArr = (obj) => [0, 1, 2, 3].map((i) => (obj && obj[i]) || null);
 const seatsObj = (arr) => Object.fromEntries(arr.map((s, i) => [i, s]).filter(([, s]) => s));
 
 function shareCode(code) {
-  const url = location.origin + location.pathname;
-  const text = `تعالى نلعب بانانا 🍌\nادخل على ${url}\nودوس "العب مع صحابك" واكتب الكود: ${code}`;
+  const url = `${location.origin}${location.pathname}?room=${code}`;
+  const text = `تعالى نلعب بانانا 🍌\nدوس على اللينك وهتدخل الأوضة على طول:\n${url}`;
   const copy = () => navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {});
   if (navigator.share) navigator.share({ text }).catch(copy); else copy();
 }

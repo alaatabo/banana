@@ -7,9 +7,9 @@
   --teal: #2aa2b1;
   --pink: #ff4f8b;
   --sky: #7fe3f0;
-  --card-me: min(17vw, 74px);
-  --card-top: min(9.5vw, 40px);
-  --card-side: min(9vw, 38px);
+  --card-me: min(18.7vw, 81px);
+  --card-top: min(10.5vw, 44px);
+  --card-side: min(9.9vw, 42px);
   --display: 'Lalezar', system-ui, sans-serif;
   --latin: 'Lilita One', 'Lalezar', system-ui, sans-serif;
   --body: 'Cairo', system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
@@ -449,3 +449,34 @@ table.scores tr.win td { background: #fff0b0; font-weight: 800; }
    with a soft blurred jungle around it */
 body::before { content: ''; position: fixed; inset: -30px; background: #123826 url('cards/bg-jungle.webp') center / cover; filter: blur(18px) brightness(.55); z-index: -1; }
 .pin { color: var(--ink); -webkit-user-select: text; user-select: text; caret-color: var(--ink); font-family: var(--latin), sans-serif; }
+.snd-home { position: absolute; top: 12px; left: 12px; width: 46px; height: 46px; font-size: 1.3rem; display: flex; align-items: center; justify-content: center; z-index: 3; }
+/* card numbers on the other players' cards, so "take card 2 of X" is clear */
+.seat:not(.bottom) .slot .pos { top: -7px; left: auto; right: -7px; width: 17px; height: 17px; border-radius: 50%; background: var(--banana); color: var(--ink); border: 2px solid var(--ink); font-size: .62rem; font-weight: 900; line-height: 13px; opacity: 1; z-index: 4; box-sizing: border-box; }
+/* BANANA! call */
+.banana-call { position: absolute; inset: 0; z-index: 66; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: radial-gradient(circle, rgba(42,22,8,.82), rgba(42,22,8,.55) 75%); animation: bc-fade 2.4s ease-out both; }
+.banana-call img { width: min(82%, 360px); filter: drop-shadow(0 8px 0 rgba(0,0,0,.35)); animation: bc-slam 2.4s cubic-bezier(.2,1.5,.4,1) both; }
+.bc-rays { position: absolute; left: 50%; top: 50%; width: 900px; height: 900px; margin: -450px 0 0 -450px; background: repeating-conic-gradient(rgba(255,216,77,.28) 0 10deg, transparent 10deg 20deg); border-radius: 50%; -webkit-mask: radial-gradient(circle, #000 20%, transparent 62%); mask: radial-gradient(circle, #000 20%, transparent 62%); animation: bc-spin 2.4s linear both; }
+.bc-who { position: relative; font-family: var(--display); font-size: 1.8rem; color: var(--banana); text-shadow: 0 3px 0 var(--ink), 0 0 12px rgba(0,0,0,.6); animation: bc-up .4s .25s both; }
+.bc-sub { position: relative; font-weight: 800; color: var(--cream); text-shadow: 0 2px 0 var(--ink); animation: bc-up .4s .35s both; }
+@keyframes bc-slam { 0% { transform: scale(3) rotate(-12deg); opacity: 0; } 14% { transform: scale(.85) rotate(4deg); opacity: 1; } 22% { transform: scale(1.08) rotate(-3deg); } 30%, 36%, 42% { transform: scale(1) rotate(0); } 33% { transform: scale(1.03) translateX(-6px) rotate(-2deg); } 39% { transform: scale(1.03) translateX(6px) rotate(2deg); } 85% { transform: scale(1); opacity: 1; } 100% { transform: scale(.6); opacity: 0; } }
+@keyframes bc-spin { from { transform: rotate(0) scale(.4); opacity: 0; } 15% { opacity: 1; transform: rotate(20deg) scale(1); } 85% { opacity: 1; } to { transform: rotate(90deg) scale(1.1); opacity: 0; } }
+@keyframes bc-up { from { transform: translateY(20px); opacity: 0; } }
+@keyframes bc-fade { 0% { opacity: 0; } 8% { opacity: 1; } 88% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .banana-call img, .bc-rays { animation: bc-fade 2.4s both; } }
+.ban-fly { position: fixed; left: 0; top: 0; z-index: 70; pointer-events: none; filter: drop-shadow(0 4px 2px rgba(0,0,0,.35)); will-change: transform; }
+.ban-splat { position: fixed; z-index: 69; pointer-events: none; }
+.ban-splat svg { width: 100%; height: 100%; display: block; }
+.who .avatar { touch-action: manipulation; }
+.game:has(.banana-call) .log { opacity: 0; }
+
+/* wooden place under every card */
+.slot .plk { position: absolute; inset: -11% -13%; background: url('cards/slot.webp') center / 100% 100% no-repeat; z-index: 0; pointer-events: none; filter: drop-shadow(0 3px 2px rgba(0,0,0,.35)); }
+.slot > .card-img, .slot > svg, .slot > img:not(.plk) { position: relative; z-index: 1; }
+.slot.empty { border: 0; background: none; }
+.slot.ghost { visibility: visible; }
+.slot.ghost > :not(.plk) { visibility: hidden; }
+
+.seat.top .hand { gap: 10px; }
+.seat.bottom .hand { gap: 14px; }
+.seat.left .slot, .seat.right .slot { margin: calc(var(--card-side) * -0.2 + 5px) 0; }
+.seat.left .slot .pos, .seat.right .slot .pos { transform: rotate(-90deg); }
