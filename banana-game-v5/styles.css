@@ -480,3 +480,19 @@ body::before { content: ''; position: fixed; inset: -30px; background: #123826 u
 .seat.bottom .hand { gap: 14px; }
 .seat.left .slot, .seat.right .slot { margin: calc(var(--card-side) * -0.2 + 5px) 0; }
 .seat.left .slot .pos, .seat.right .slot .pos { transform: rotate(-90deg); }
+
+/* framed pictures: no own border/background; the picture shows only through the frame's hole */
+.avatar.framed { border-width: 0 !important; background: transparent !important; box-shadow: none !important; animation: none !important; }
+.avatar.framed .avf { -webkit-mask-size: 100% 100%; mask-size: 100% 100%; border-radius: 0; }
+.avatar.framed.active .frame { filter: drop-shadow(0 0 6px rgba(255,216,77,.95)) drop-shadow(0 0 14px rgba(255,216,77,.7)); }
+.avatar:has(.frame[data-k="1"]) .avf { -webkit-mask-image: url('gifts/fmask1.png'); mask-image: url('gifts/fmask1.png'); }
+.avatar:has(.frame[data-k="2"]) .avf { -webkit-mask-image: url('gifts/fmask2.png'); mask-image: url('gifts/fmask2.png'); }
+.avatar:has(.frame[data-k="3"]) .avf { -webkit-mask-image: url('gifts/fmask3.png'); mask-image: url('gifts/fmask3.png'); }
+.avatar:has(.frame[data-k="4"]) .avf { -webkit-mask-image: url('gifts/fmask4.png'); mask-image: url('gifts/fmask4.png'); }
+.avatar:has(.frame[data-k="5"]) .avf { -webkit-mask-image: url('gifts/fmask5.png'); mask-image: url('gifts/fmask5.png'); }
+.avatar:has(.frame[data-k="6"]) .avf { -webkit-mask-image: url('gifts/fmask6.png'); mask-image: url('gifts/fmask6.png'); }
+.avatar:has(.frame[data-k="7"]) .avf { -webkit-mask-image: url('gifts/fmask7.png'); mask-image: url('gifts/fmask7.png'); }
+.avatar:has(.frame[data-k="8"]) .avf { -webkit-mask-image: url('gifts/fmask8.png'); mask-image: url('gifts/fmask8.png'); }
+.avatar:has(.frame[data-k="9"]) .avf { -webkit-mask-image: url('gifts/fmask9.png'); mask-image: url('gifts/fmask9.png'); }
+.avatar:has(.frame[data-k="10"]) .avf { -webkit-mask-image: url('gifts/fmask10.png'); mask-image: url('gifts/fmask10.png'); }
+.av-opt.framed.on::after { content: "✓"; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--banana); border: 2px solid var(--ink); color: var(--ink); font-weight: 900; font-size: .8rem; display: flex; align-items: center; justify-content: center; z-index: 3; }

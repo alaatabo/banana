@@ -54,10 +54,10 @@ export function nextBotAvatar(used = []) {
 
 // Gift frames: a ring drawn around a player's picture. Each frame picture is
 // centred on its hole; FRAME_SCALE is its size compared with the picture.
-export const FRAME_SCALE = [1.803, 1.785, 1.912, 2.447, 1.71, 2.534, 1.448, 1.835, 2.279, 2.429];
+export const FRAME_SCALE = [1.543, 1.52, 1.822, 1.981, 1.587, 1.933, 1.379, 1.614, 1.628, 1.557];
 export function frameHTML(fr) {
   const m = typeof fr === 'string' && /^f(\d+)$/.exec(fr);
   const k = m && FRAME_SCALE[+m[1] - 1];
   if (!k) return '';
-  return `<img class="frame" src="gifts/frame${m[1]}.webp" alt="" draggable="false" style="width:${(k * 100).toFixed(1)}%;height:${(k * 100).toFixed(1)}%">`;
+  return `<img class="frame" data-k="${m[1]}" src="gifts/frame${m[1]}.webp" alt="" draggable="false" style="width:${(k * 100).toFixed(1)}%;height:${(k * 100).toFixed(1)}%">`;
 }
