@@ -121,9 +121,16 @@ export class Bot {
 
   turn(v) {
     const me = v.players.find((x) => x.id === this.pid);
-    if (v.mode === 'solo' && !v.banana && me.turnsPlayed >= 3) {
-      const mine = this.estSum(v);
-      const others = Math.min(...v.players.filter((x) => x.id !== this.pid).map((x) => this.estSum(v, x.id)));
+    if (!v.banana && !v.lastLap && me.turnsPlayed >= 3) {
+      let mine = this.estSum(v);
+      let others = Math.min(...v.players.filter((x) => x.id !== this.pid).map((x) => this.estSum(v, x.id)));
+      if (v.mode === 'team') {
+        // a team is judged on both partners' cards
+        const mate = v.players.find((x) => x.team === me.team && x.id !== this.pid);
+        const opp = v.players.filter((x) => x.team !== me.team);
+        mine = (mine + (mate ? this.estSum(v, mate.id) : 0)) / 2;
+        others = opp.reduce((t, x) => t + this.estSum(v, x.id), 0) / 2;
+      }
       // Get bolder the longer the round runs.
       const limit = this.cfg.banana + 2 * Math.max(0, me.turnsPlayed - 4);
       if (mine <= limit && (!this.cfg.smart || mine <= others + 2 || me.turnsPlayed > 10)) return { t: 'banana' };

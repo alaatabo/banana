@@ -35,6 +35,9 @@ export const DECK_COUNTS = {
 export const REVEAL_MS = 3000;
 export const GOLDEN_MS = 5000;
 export const ROUNDS = 5;
+// Default plan: rounds 1-3 normal, 4 doubled, 5 blind. Each round: 'normal' | 'double' | 'blind' | 'five' (5 cards).
+export const DEFAULT_ROUNDS = ['normal', 'normal', 'normal', 'double', 'blind'];
+const ROUND_KINDS = ['normal', 'double', 'blind', 'five'];
 
 export const isCmd = (name) => CARD_DEFS[name].kind === 'cmd';
 export const hasEffect = (name) => isCmd(name) || !!NUM_EFFECT[name];
@@ -146,7 +149,8 @@ function reveal(state, to, items, dur = REVEAL_MS) {
 }
 
 // ---------------------------------------------------------------- setup
-export function createGame({ mode, players, seed = Date.now() }) {
+export function createGame({ mode, players, seed = Date.now(), rounds = DEFAULT_ROUNDS }) {
+  if (!Array.isArray(rounds) || rounds.length < 1 || rounds.length > 7 || rounds.some((k) => !ROUND_KINDS.includes(k))) rounds = DEFAULT_ROUNDS;
   if (mode === 'team' && players.length !== 4) fail('team mode needs 4 players');
   if (mode === 'solo' && (players.length < 3 || players.length > 4)) fail('solo mode needs 3-4 players');
   const state = {
@@ -156,7 +160,7 @@ export function createGame({ mode, players, seed = Date.now() }) {
       id: pl.id, name: pl.name, av: pl.av || null, fr: pl.fr || null, bot: pl.bot || null, team: mode === 'team' ? i % 2 : i,
       slots: [], turnsPlayed: 0, skipNext: false, total: 0, roundScores: [], roundHands: [],
     })),
-    round: 0, tiebreak: 0, startIdx: -1, current: null,
+    rounds: rounds.slice(), round: 0, tiebreak: 0, startIdx: -1, current: null,
     stack: [], pending: null, lastActivated: null, floorCmd: null, clock: 0,
     banana: null, finalQueue: null, teamFinisher: null, deckOut: false,
     over: false, winners: null,
@@ -173,9 +177,8 @@ export function createGame({ mode, players, seed = Date.now() }) {
 
 export function roundType(state) {
   if (state.tiebreak > 0) return 'blind';
-  if (state.round === 4) return 'double';
-  if (state.round === 5) return 'blind';
-  return 'normal';
+  const plan = state.rounds || DEFAULT_ROUNDS;
+  return plan[state.round - 1] || 'normal';
 }
 
 function startRound(state) {
@@ -188,7 +191,8 @@ function startRound(state) {
   state.banana = null; state.finalQueue = null; state.teamFinisher = null; state.deckOut = false;
   for (const p of state.players) {
     p.slots = []; p.turnsPlayed = 0; p.skipNext = false; p.finished = false;
-    for (let k = 0; k < 4; k++) giveCard(state, p, state.deck.pop());
+    const nCards = roundType(state) === 'five' ? 5 : 4;
+    for (let k = 0; k < nCards; k++) giveCard(state, p, state.deck.pop());
   }
   const blind = roundType(state) === 'blind';
   if (!blind) toFloor(state, state.deck.pop());
@@ -309,7 +313,7 @@ const TASKS = {
               // finisher finished out of own turn (not possible in solo, kept for safety)
             }
           }
-          if (state.mode === 'team' && !state.teamFinisher) state.teamFinisher = p.id;
+          if (state.mode === 'team' && !state.teamFinisher && !state.finalQueue) state.teamFinisher = p.id;
         }
       }
       if (state.mode === 'team' && state.deckOut) { schedule(state, { k: 'roundEnd' }); return; }
@@ -902,8 +906,8 @@ function turnAction(state, pid, a) {
       return;
     }
     case 'banana': {
-      if (state.mode !== 'solo') fail('no banana in team mode');
       if (state.banana) fail('banana already called');
+      if (state.finalQueue || state.teamFinisher) fail('last lap already running');
       if (p.turnsPlayed < 3) fail('banana needs 3 played turns');
       state.pending = null;
       state.banana = pid;
@@ -1188,7 +1192,7 @@ function roundEnd(state) {
   }
   emit(state, { type: 'roundEnd', to: 'all', round: state.round, tiebreak: state.tiebreak, detail, unit, scores, wins, mult });
 
-  const finished = state.round >= ROUNDS;
+  const finished = state.round >= (state.rounds || DEFAULT_ROUNDS).length;
   if (finished) {
     const totals = state.mode === 'team' ? state.teamTotals : state.players.map((p) => p.total);
     const best = Math.min(...totals);
@@ -1224,8 +1228,8 @@ export function viewFor(state, pid) {
   }
   const top = topDiscard(state);
   return {
-    mode: state.mode, me: pid, round: state.round, roundType: roundType(state), tiebreak: state.tiebreak,
-    current: state.current, banana: state.banana, over: state.over, winners: state.winners,
+    mode: state.mode, me: pid, round: state.round, rounds: (state.rounds || DEFAULT_ROUNDS).slice(), roundType: roundType(state), tiebreak: state.tiebreak,
+    current: state.current, banana: state.banana, lastLap: !!(state.finalQueue || state.teamFinisher), over: state.over, winners: state.winners,
     deckCount: state.deck.length,
     discardTop: top ? nameOf(state, top) : null,
     discardCount: state.discard.length,

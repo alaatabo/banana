@@ -11,7 +11,7 @@ import { isLocalOnly } from './store.js';
 import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
-const APP_DATE = '٢٢ نوفمبر ٢٠٢٦';
+const APP_DATE = '٢٣ نوفمبر ٢٠٢٦';
 const APP_V = 22; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -206,7 +206,7 @@ function applyUpdate(view, events) {
   const key = view.pending ? JSON.stringify([view.pending.kind, view.pending.step, view.pending.card, view.pending.spec, view.pending.cards && view.pending.cards.length]) : '';
   if (key !== ui.selKey) { ui.selKey = key; ui.sel = {}; }
   if (!wasMyTurn && view.pending && view.pending.kind === 'turn') { buzz(); sfx('turn'); }
-  if (view.pending && ['guard', 'snapWindow', 'delegate'].includes(view.pending.kind)) buzz();
+  if (view.pending && ['guard', 'delegate'].includes(view.pending.kind)) buzz();
   // Hide cards that are about to fly in, so they land instead of popping up.
   if (before) planGhosts(events);
   render();
@@ -410,7 +410,7 @@ function handleEvent(e) {
   switch (e.type) {
     case 'roundStart': {
       ui.reveals = {}; ui.lastRoundEnd = null;
-      const kind = e.tiebreak ? 'جولة فاصلة' : e.kind === 'double' ? 'السكور × ٢' : e.kind === 'blind' ? 'جولة عمياني' : '';
+      const kind = e.tiebreak ? 'جولة فاصلة' : e.kind === 'double' ? 'السكور × ٢' : e.kind === 'blind' ? 'جولة عمياني' : e.kind === 'five' ? 'جولة ٥ كروت' : '';
       banner(`الجولة ${e.round}${kind ? '<br><small style="font-size:.5em">' + kind + '</small>' : ''}`, 1400);
       break;
     }
@@ -480,7 +480,7 @@ function startBots() {
   LS.set('lastBots', botNames);
   const players = [{ id: 'me', name: ui.name || 'أنا', av: myAvatar(), fr: myFrame() }];
   for (let i = 1; i < n; i++) players.push({ id: 'b' + i, name: botNames[i - 1], bot: s.level, av: 'bot' + (i - 1) });
-  const host = new Host({ mode: s.mode, players, timed: s.timed, botDelay: /fast/.test(location.search) ? 40 : 900 });
+  const host = new Host({ mode: s.mode, players, timed: s.timed, rounds: validRounds(s.rounds), botDelay: /fast/.test(location.search) ? 40 : 900 });
   ui.me = 'me';
   ui.conn = { act: (a) => host.act('me', a), leave: () => host.destroy(), isHost: true, host, local: true };
   ui.screen = 'game';
@@ -504,6 +504,24 @@ function render() {
   if (ui.screen === 'rules') return renderRules();
   if (ui.screen === 'cards') return renderCards();
   if (ui.screen === 'game') return renderGame();
+}
+
+// Rounds: how many (1-7) and what kind each one is.
+const DEF_ROUNDS = ['normal', 'normal', 'normal', 'double', 'blind'];
+const RKINDS = [['normal', 'عادي'], ['double', 'دابل ×٢'], ['blind', 'عمياني'], ['five', '٥ كروت']];
+const AR = ['١', '٢', '٣', '٤', '٥', '٦', '٧'];
+const validRounds = (r) => (Array.isArray(r) && r.length >= 1 && r.length <= 7 && r.every((k) => RKINDS.some((x) => x[0] === k)) ? r : DEF_ROUNDS.slice());
+function roundsPicker(scope, rounds, editable) {
+  rounds = validRounds(rounds);
+  if (!editable) return `<div class="rp ro">${rounds.map((k, i) => `<span><b>${AR[i]}</b>${RKINDS.find((x) => x[0] === k)[1]}</span>`).join('')}</div>`;
+  return `<div class="rp">
+    <div class="rp-count">${[1, 2, 3, 4, 5, 6, 7].map((n) => `<button data-rc="${scope}|${n}" aria-pressed="${rounds.length === n}">${AR[n - 1]}</button>`).join('')}</div>
+    ${rounds.map((k, i) => `<div class="rp-row"><span class="rp-n">الجولة ${AR[i]}</span><div class="seg rp-seg">${RKINDS.map(([v, l]) => `<button data-rk="${scope}|${i}|${v}" aria-pressed="${v === k}">${l}</button>`).join('')}</div></div>`).join('')}
+  </div>`;
+}
+function setRounds(scope, rounds) {
+  if (scope === 'l' && ui.lobby) { ui.lobby.updateSettings({ rounds }); return; }
+  ui.setup.rounds = rounds; LS.set('setup', ui.setup); render();
 }
 
 function seg(name, options, value) {
@@ -580,6 +598,7 @@ function renderBotSetup() {
       ${s.mode === 'solo' ? `<div class="field"><span class="ribbon">عدد اللاعبين</span>${seg('count', [[3, '٣ لاعبين'], [4, '٤ لاعبين']], s.count)}</div>` : '<p class="hint">إنت وروبوت شريكك، ضد روبوتين.</p>'}
       <div class="field"><span class="ribbon">مستوى الروبوتات</span>${seg('level', [['easy', 'سهل'], ['medium', 'متوسط'], ['hard', 'صعب']], s.level)}</div>
       <div class="field"><span class="ribbon">الوقت</span>${seg('timed', [[true, '١٥ ثانية للدور'], [false, 'مفتوح']], s.timed)}</div>
+      <div class="field"><span class="ribbon">عدد الجولات ونوعها</span>${roundsPicker('b', s.rounds, true)}</div>
     </div>
     <button class="plank gold" data-act-ui="start-bots" style="min-height:72px;font-size:1.9rem">ابدأ</button>`);
 }
@@ -659,7 +678,8 @@ function renderLobby() {
       ${s.mode === 'solo' ? `<div class="field"><span class="ribbon">عدد اللاعبين</span>${seg('lcount', [[3, '٣'], [4, '٤']], s.count)}</div>` : ''}
       <div class="field"><span class="ribbon">الوقت</span>${seg('ltimed', [[true, '١٥ ثانية'], [false, 'مفتوح']], s.timed)}</div>
       <div class="field"><span class="ribbon">مستوى الروبوتات</span>${seg('llevel', [['easy', 'سهل'], ['medium', 'متوسط'], ['hard', 'صعب']], s.level)}</div>
-    </div>` : `<p class="board hint" style="margin:0">${s.mode === 'team' ? 'زوجي' : 'فردي'} — ${s.timed ? '١٥ ثانية للدور' : 'وقت مفتوح'}. مستنيين صاحب الأوضة يبدأ.</p>`}
+      <div class="field"><span class="ribbon">عدد الجولات ونوعها</span>${roundsPicker('l', s.rounds, true)}</div>
+    </div>` : `<div class="board" style="display:flex;flex-direction:column;gap:8px"><p class="hint" style="margin:0">${s.mode === 'team' ? 'زوجي' : 'فردي'} — ${s.timed ? '١٥ ثانية للدور' : 'وقت مفتوح'}. مستنيين صاحب الأوضة يبدأ.</p>${roundsPicker('l', s.rounds, false)}</div>`}
     <div style="display:flex;flex-direction:column;gap:10px">${list.join('')}</div>
     ${isHost ? `<button class="plank gold" data-lobby="start" ${full ? '' : 'disabled'} style="min-height:72px;font-size:1.8rem">ابدأ اللعب</button>` : ''}
     ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}`);
@@ -696,7 +716,7 @@ function pickableSlots() {
   if (!p) return set;
   const mine = meP().slots;
   const add = (ids) => ids.forEach((i) => set.add(i));
-  if (sel.mode === 'snap' || sel.mode === 'guard' || sel.mode === 'gr2' || sel.mode === 'selfg') add(mine.filter((s) => s.has && !s.frozen && !s.locked).map((s) => s.id));
+  if (sel.mode === 'snap' || sel.mode === 'guard' || sel.mode === 'gr2' || sel.mode === 'selfg' || (p && p.kind === 'snapWindow' && !sel.mode)) add(mine.filter((s) => s.has && !s.frozen && !s.locked).map((s) => s.id));
   else if (p.kind === 'hold' || (p.kind === 'extra' && sel.extraIdx != null)) add(mine.filter((s) => !s.frozen && !s.locked).map((s) => s.id));
   else if (p.kind === 'target') {
     const sp = p.spec;
@@ -748,7 +768,7 @@ function statusText() {
     case 'turn': return '<b>دورك!</b> اسحب، أو خد من الأرض، أو بصّر';
     case 'hold': return p.from === 'deck' ? 'بدّله بكارت من كروتك، أو ارميه' : 'اختار الكارت اللي هتبدّله';
     case 'extra': return sel.extraIdx == null ? 'Extra: اختار كارت من الاتنين' : 'اضغط على كارت تبدّله، أو ارمي';
-    case 'snapWindow': return `شريكك رمى <b>${cardName(p.top)}</b> — تبصّر عليه؟`;
+    case 'snapWindow': return `معاك <b>${cardName(p.top)}</b>؟ دوس على كارتك بسرعة وبصّر!`;
     case 'target': {
       if (p.step === 'tornadoPick') return `الكومة فيها ${p.spec.n} بس — اختار ${p.spec.n} كروت تتغيّر`;
       if (p.spec.type === 'swap' && sel.mine) return 'دلوقتي اختار كارت عند لاعب تاني';
@@ -776,22 +796,22 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   const cls = ['seat', pos];
   if (partner) cls.push('partner');
   if (pplayers.has(o.id)) cls.push('pickable');
-  if (o.slots.length > 5) cls.push('many');
+  if (o.slots.length > 4) cls.push('many');
   const isMe = o.id === ui.me;
   const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: i + 1 })).join('');
   const name = isMe ? 'إنت' : esc(o.name);
-  return `<div class="${cls.join(' ')}" data-player="${o.id}">
+  return `<div class="${cls.join(' ')}" data-player="${o.id}" style="--n:${Math.max(4, o.slots.length)}">
     <div class="who" data-who="${o.id}">${avatarHTML(o.id, { active: v.current === o.id, ring: waiting && v.deadline, small: isMe }, o.av, o.fr)}<span class="nmr wood ${v.current === o.id ? 'turn' : ''}"><span class="pn">${name}</span><span class="ps">${o.total}</span></span>${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}</div>
     <div class="hand" data-hand="${o.id}">${slots || '<span class="ribbon">مفيش كروت</span>'}</div>
   </div>`;
 }
 
-const TABLES = [['wood', 'خشب'], ['purple', 'بنفسجي'], ['blue', 'أزرق'], ['black', 'أسود'], ['green', 'أخضر'], ['teal', 'تركواز'], ['palestine', 'فلسطين']];
+const TABLES = [['default', 'الأساسية'], ['sky', 'سما'], ['sand', 'رملي'], ['sea', 'بحر'], ['night', 'ليل'], ['pink', 'بمبي'], ['palestine', 'فلسطين']];
 function myTable() {
   if (ui.tableSel && ownedTables().some((g) => g.id === ui.tableSel)) return ui.tableSel;
-  const t = LS.get('table'); return TABLES.some((x) => x[0] === t) ? t : 'wood';
+  const t = LS.get('table'); return TABLES.some((x) => x[0] === t) ? t : 'default';
 }
-const tableSrc = (id) => (giftById(id) ? giftById(id).src : `cards/table-${id}.webp`);
+const tableSrc = (id) => (giftById(id) ? giftById(id).src : `cards/tables/${id}.webp`);
 function tableSheet() {
   const cur = myTable();
   return `<div class="sheet-bg" data-close="1"><div class="sheet"><h2>لون الترابيزة</h2><p>اختار اللون اللي يريحك — تقدر تغيّره في أي وقت.</p>
@@ -815,7 +835,7 @@ function renderGame() {
   const top = v.discardTop;
   const canTake = p && p.kind === 'turn' && top && CARD_INFO[top].tier !== 'cmd';
   const canDraw = p && p.kind === 'turn';
-  const typeChip = v.tiebreak ? 'فاصلة' : v.roundType === 'double' ? '×2' : v.roundType === 'blind' ? 'عمياني' : '';
+  const typeChip = v.tiebreak ? 'فاصلة' : v.roundType === 'double' ? '×2' : v.roundType === 'blind' ? 'عمياني' : v.roundType === 'five' ? '٥ كروت' : '';
   const deck = v.deckCount ? `<span class="stack">${backSVG()}</span><span class="stack">${backSVG()}</span><span class="stack">${backSVG()}</span>` : '';
   let heldDeck = '', heldFloor = '';
   if (v.holding && !(v.holding.pid === ui.me && p && p.kind === 'extra')) {
@@ -826,9 +846,9 @@ function renderGame() {
     if (fromFloor) heldFloor = el; else heldDeck = el;
   }
 
-  $app.innerHTML = `<div class="game" style="background-image:url('${tableSrc(myTable())}')${myTable() === 'palestine' || giftById(myTable()) ? ';background-position:center' : ''}">
+  $app.innerHTML = `<div class="game" style="background-image:url('${tableSrc(myTable())}')${';background-position:center'}">
   <div class="topbar">
-    <span class="round-chip wood">الجولة ${v.round}/5${typeChip ? `<small>${typeChip}</small>` : ''}</span>
+    <span class="round-chip wood">الجولة ${v.round}/${planOf(v).length}${typeChip ? `<small>${typeChip}</small>` : ''}</span>
     <span class="row">
       <button class="round" data-sheet="scores" aria-label="السكور">${ICON.trophy}</button>
       <button class="round" data-sheet="menu" aria-label="القائمة">${ICON.menu}</button>
@@ -839,7 +859,7 @@ function renderGame() {
     <div class="center">
       <div class="piles">
         <div class="pile ${canDraw ? 'pickable' : ''}" data-pile="deck" ${canDraw ? 'role="button" tabindex="0" aria-label="اسحب"' : ''}>${deck}${heldDeck}<span class="ribbon lbl">الكومة ${v.deckCount}</span></div>
-        <div class="pile ${top ? '' : 'none'} ${canTake ? 'pickable' : ''}" data-pile="discard" ${canTake ? 'role="button" tabindex="0" aria-label="خد من الأرض"' : ''}>${top ? cardSVG(top) : ''}${heldFloor}<span class="ribbon lbl">الأرض</span></div>
+        <div class="pile ${top ? '' : 'none'} ${canTake ? 'pickable' : ''} ${v.waitingKind === 'snapWindow' && !ui.gated ? 'snapglow' : ''}" data-pile="discard" ${canTake ? 'role="button" tabindex="0" aria-label="خد من الأرض"' : ''}>${top ? cardSVG(top) : ''}${heldFloor}${v.waitingKind === 'snapWindow' && !ui.gated ? '<i class="snapbar"></i>' : ''}<span class="ribbon lbl">الأرض</span></div>
       </div>
       <div class="status" aria-live="polite">${statusText() || '&nbsp;'}</div>
       <div class="log">${ui.logs.map((l) => `<div data-log="${l.id}">${esc(l.text)}</div>`).join('')}</div>
@@ -864,13 +884,13 @@ function actionsHTML() {
     case 'ready':
       return p.answered ? '' : '<button class="plank gold banana-btn" data-a="ready">حفظتهم — جاهز</button>';
     case 'turn': {
-      const canBanana = v.mode === 'solo' && !v.banana && me.turnsPlayed >= 3;
+      const canBanana = !v.banana && !v.lastLap && me.turnsPlayed >= 3;
       const top = v.discardTop;
       return `<button class="plank wood" data-a="draw">اسحب</button>
         <button class="plank wood" data-a="take" ${top && CARD_INFO[top].tier !== 'cmd' ? '' : 'disabled'}>خد من الأرض</button>
         ${snapBtn()}
         ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="gr1">Guard</button>` : ''}
-        ${v.mode === 'solo' ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : v.banana ? 'بانانا اتقالت' : `بانانا بعد ${3 - me.turnsPlayed} ${3 - me.turnsPlayed === 1 ? 'دور' : 'أدوار'}`}</button>` : ''}`;
+        ${!v.lastLap || v.banana ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : v.banana ? 'بانانا اتقالت' : `بانانا بعد ${3 - me.turnsPlayed} ${3 - me.turnsPlayed === 1 ? 'دور' : 'أدوار'}`}</button>` : ''}`;
     }
     case 'hold':
       return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
@@ -878,7 +898,7 @@ function actionsHTML() {
       return `${sel.extraIdx != null ? `<button class="plank wood" data-ui="extra-throw">ارمي${effectNote(p.cards[sel.extraIdx].name)}</button>` : ''}
         ${p.snapsLeft > 0 ? snapBtn() : ''}`;
     case 'snapWindow':
-      return `<button class="plank cream" data-a="pass">مش هبصّر</button>${snapBtn('بصّر')}`;
+      return ''; // no question: just tap your matching card while the floor card glows
     case 'target': {
       const sp = p.spec;
       if (sp.type === 'player') return sp.options.map((id) => `<button class="plank wood" data-target="${id}">${esc(pname(id))}</button>`).join('');
@@ -985,7 +1005,9 @@ function sheetHTML() {
   return '';
 }
 
-const RN = ['١', '٢', '٣', '٤', '٥'];
+const RN = ['١', '٢', '٣', '٤', '٥', '٦', '٧'];
+const KIND_SHORT = { double: '×٢', blind: 'عمياني', five: '٥ كروت' };
+const planOf = (v) => validRounds(v && v.rounds);
 
 function boardWrap(title, body, { close = false, sub = '' } = {}) {
   const fresh = ui.boardShown !== title;
@@ -1004,7 +1026,8 @@ function playerRounds(p) {
   const hands = p.roundHands || [];
   const rows = p.roundScores.map((sc, r) => {
     const h = hands[r] || {};
-    const label = r < 5 ? `الجولة ${RN[r]}${r === 3 ? ' (×٢)' : r === 4 ? ' (عمياني)' : ''}` : 'جولة فاصلة';
+    const pk = planOf(v)[r];
+    const label = r < planOf(v).length ? `الجولة ${RN[r]}${KIND_SHORT[pk] ? ` (${KIND_SHORT[pk]})` : ''}` : 'جولة فاصلة';
     return `<div class="pr-row ${h.win ? 'win' : ''}">
       <div class="pr-top"><b>${label}</b>${h.win ? '<span class="chip gold">كسب 👑</span>' : ''}<span class="chip">كروته <b>${h.sum ?? '·'}</b></span><span class="chip dark">السكور <b>${sc}</b></span></div>
       ${h.slots ? miniHand(h.slots) : ''}
@@ -1019,8 +1042,9 @@ function scoresSheet() {
   const v = ui.view;
   const sel = ui.scorePid && v.players.find((x) => x.id === ui.scorePid);
   if (sel) return boardWrap('السكور', playerRounds(sel), { close: true });
-  const head = `<tr><th></th>${RN.map((r, i) => `<th>${r}${i === 3 ? '<small>×٢</small>' : ''}</th>`).join('')}<th>المجموع</th></tr>`;
-  const rows = v.players.map((p) => `<tr class="tap" data-ph="${p.id}"><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av, p.fr)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span><i class="more">‹</i></div></td>${[0, 1, 2, 3, 4].map((r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
+  const plan = planOf(v);
+  const head = `<tr><th></th>${plan.map((k, i) => `<th>${RN[i]}${k === 'double' ? '<small>×٢</small>' : ''}</th>`).join('')}<th>المجموع</th></tr>`;
+  const rows = v.players.map((p) => `<tr class="tap" data-ph="${p.id}"><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av, p.fr)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span><i class="more">‹</i></div></td>${plan.map((_, r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
   return boardWrap('السكور', `<div class="parch"><table class="wb-table">${head}${rows}</table></div>
     <p class="wb-hint">دوس على أي لاعب تشوف كروته في كل جولة 🍌</p>
     <button class="plank cream" data-close="1">رجوع</button>`, { close: true });
@@ -1083,7 +1107,7 @@ function startTimerBar() {
   cancelAnimationFrame(timerRAF);
   const v = ui.view;
   if (!v || !v.deadline) return;
-  const total = ['guard', 'snapWindow', 'delegate'].includes(v.waitingKind) ? 8000 : 15000;
+  const total = v.waitingKind === 'snapWindow' ? 2500 : ['guard', 'delegate'].includes(v.waitingKind) ? 8000 : 15000;
   const tick = () => {
     const left = Math.max(0, ui.view.deadline - Date.now());
     const f = Math.min(1, left / total);
@@ -1106,7 +1130,7 @@ function onSlotTap(slotId, owner) {
   if (!p) return;
   const pick = pickableSlots();
   if (!pick.has(slotId)) return;
-  if (sel.mode === 'snap') { send({ t: 'snap', slotId }); ui.sel = {}; return; }
+  if (sel.mode === 'snap' || (ui.view.pending && ui.view.pending.kind === 'snapWindow' && !sel.mode)) { send({ t: 'snap', slotId }); ui.sel = {}; return; }
   if (sel.mode === 'guard') { send({ t: 'guard', slotId }); ui.sel = {}; return; }
   if (sel.mode === 'selfg') { ui.sel = {}; return send({ t: 'throwGuard', slotId }); }
   if (sel.mode === 'gr2') { send({ t: 'guardRemove', guardSlot: slotId, targetSlot: sel.target, what: sel.what }); ui.sel = {}; return; }
@@ -1185,7 +1209,7 @@ function ownerSheet() {
 }
 
 $app.addEventListener('click', (ev) => {
-  const t = ev.target.closest('[data-fr],[data-pin],[data-ph],[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
+  const t = ev.target.closest('[data-rc],[data-rk],[data-fr],[data-pin],[data-ph],[data-tb],[data-av],[data-lp],[data-gr],[data-go],[data-seg],[data-act-ui],[data-a],[data-ui],[data-slot],[data-pile],[data-target],[data-player],[data-option],[data-clear],[data-delegate],[data-extra],[data-sheet],[data-close],[data-lobby]');
   if (!t) return;
   const d = t.dataset;
   if (t.tagName === 'BUTTON' && !d.slot) sfx('tap');
@@ -1196,6 +1220,8 @@ $app.addEventListener('click', (ev) => {
   if (d.lp != null) { ui.learnPage = +d.lp; return render(); }
   if (d.go === 'rules') ui.learnPage = 0;
   if (d.go) { ui.error = ''; ui.screen = d.go; return render(); }
+  if (d.rc) { const [sc, n] = d.rc.split('|'); const cur = validRounds(sc === 'l' ? ui.lobby && ui.lobby.settings.rounds : ui.setup.rounds); const next = Array.from({ length: +n }, (_, i) => cur[i] || 'normal'); return setRounds(sc, next); }
+  if (d.rk) { const [sc, i, k] = d.rk.split('|'); const cur = validRounds(sc === 'l' ? ui.lobby && ui.lobby.settings.rounds : ui.setup.rounds).slice(); cur[+i] = k; return setRounds(sc, cur); }
   if (d.seg) {
     const val = JSON.parse(d.val);
     if (d.seg.startsWith('l') && ui.lobby) { ui.lobby.updateSettings({ [d.seg.slice(1)]: val }); return; }

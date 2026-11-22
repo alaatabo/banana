@@ -55,7 +55,7 @@ export async function createRoom(ctx) {
   } catch (e) { return ctx.error('مش قادر أوصل للنت. اتأكد إنك متصل وجرّب تاني.'); }
   if (!code) return ctx.error('حاول تاني بعد شوية.');
   const s = ctx.setup();
-  const settings = { mode: s.mode, count: s.count, timed: s.timed, level: s.level };
+  const settings = { mode: s.mode, count: s.count, timed: s.timed, level: s.level, rounds: Array.isArray(s.rounds) ? s.rounds : ['normal', 'normal', 'normal', 'double', 'blind'] };
   const seats = [{ id: me, name: ctx.name(), av: ctx.avatar(), fr: ctx.frame(), host: true }, null, null, null];
   await st.set(`rooms/${code}`, { meta: { host: me, settings, status: 'lobby', created: Date.now() }, seats: seatsObj(seats) });
   st.set(`rooms/${code}/presence/${me}`, true);
@@ -141,7 +141,7 @@ export async function createRoom(ctx) {
     const seats = L.seats.slice(0, max);
     if (seats.some((x) => !x)) return ctx.toast('كمّل الأماكن الفاضية بروبوتات أو استنى صحابك');
     const players = seats.map((x) => ({ id: x.id, name: x.name, av: x.av || null, fr: x.fr || null, bot: x.bot ? L.settings.level : undefined }));
-    const game = new Host({ mode: L.settings.mode, players, timed: L.settings.timed });
+    const game = new Host({ mode: L.settings.mode, players, timed: L.settings.timed, rounds: L.settings.rounds });
     L.game = game;
     await st.update(`rooms/${code}`, { 'meta/status': 'playing', 'meta/started': Date.now() });
     for (const x of seats) {

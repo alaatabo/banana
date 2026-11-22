@@ -25,8 +25,8 @@ function paceOf(e) {
 }
 
 export class Host {
-  constructor({ mode, players, timed = true, seed = Date.now() & 0x7fffffff, botDelay = 900, onError }) {
-    this.state = createGame({ mode, players, seed });
+  constructor({ mode, players, timed = true, seed = Date.now() & 0x7fffffff, botDelay = 900, onError, rounds }) {
+    this.state = createGame({ mode, players, seed, rounds });
     this.timed = timed;
     this.botDelay = botDelay;
     this.onError = onError || ((e) => console.error(e));
@@ -145,8 +145,10 @@ export class Host {
       this.pushAll();
       return;
     }
-    if (!this.timed) return;
-    const secs = QUICK.has(p.kind) ? TIMERS.quick : TIMERS.turn;
+    // The partner's chance to snap is short and never waits for an answer.
+    const snapOnly = p.kind === 'snapWindow';
+    if (!this.timed && !snapOnly) return;
+    const secs = snapOnly ? (this.pacing ? 2.5 : 0.2) : QUICK.has(p.kind) ? TIMERS.quick : TIMERS.turn;
     const slack = this.slack();
     this.deadline = Date.now() + slack + secs * 1000;
     this.timer = setTimeout(() => {

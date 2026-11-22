@@ -496,3 +496,64 @@ body::before { content: ''; position: fixed; inset: -30px; background: #123826 u
 .avatar:has(.frame[data-k="9"]) .avf { -webkit-mask-image: url('gifts/fmask9.png'); mask-image: url('gifts/fmask9.png'); }
 .avatar:has(.frame[data-k="10"]) .avf { -webkit-mask-image: url('gifts/fmask10.png'); mask-image: url('gifts/fmask10.png'); }
 .av-opt.framed.on::after { content: "✓"; position: absolute; bottom: -10px; left: 50%; transform: translateX(-50%); width: 22px; height: 22px; border-radius: 50%; background: var(--banana); border: 2px solid var(--ink); color: var(--ink); font-weight: 900; font-size: .8rem; display: flex; align-items: center; justify-content: center; z-index: 3; }
+/* partner's quick snap chance: the floor card glows, a bar runs out */
+.pile.snapglow > .card-img { box-shadow: 0 0 0 3px var(--banana), 0 0 18px 6px rgba(255,216,77,.9); border-radius: 8px; }
+.pile .snapbar { position: absolute; left: 6%; right: 6%; bottom: -8px; height: 6px; border-radius: 4px; background: var(--banana); border: 1.5px solid var(--ink); transform-origin: right; animation: snapbar 2.5s linear forwards; z-index: 3; }
+@keyframes snapbar { to { transform: scaleX(0); } }
+/* rounds picker */
+.rp { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.rp-count { display: flex; gap: 5px; justify-content: center; }
+.rp-count button { flex: 1; min-height: 38px; border: 3px solid var(--ink); border-radius: 10px; background: var(--cream); font-family: var(--display); font-size: 1.15rem; color: var(--ink); box-shadow: 0 3px 0 var(--ink); }
+.rp-count button[aria-pressed="true"] { background: var(--banana); }
+.rp-row { display: flex; align-items: center; gap: 6px; }
+.rp-n { flex: none; width: 54px; font-weight: 800; font-size: .85rem; }
+.rp-seg { flex: 1; }
+.rp-seg button { font-size: .78rem; padding: 6px 2px; }
+.rp.ro { flex-direction: row; flex-wrap: wrap; gap: 5px; }
+.rp.ro span { background: var(--cream); color: var(--ink); border: 2px solid var(--ink); border-radius: 9px; padding: 2px 7px; font-size: .8rem; font-weight: 800; }
+.rp.ro b { margin-inline-end: 4px; color: #b5480f; }
+/* side players: column starts higher and cards overlap a little, so it never reaches my cards */
+.seat.left, .seat.right { top: 20%; }
+.seat.left .slot, .seat.right .slot { margin: calc(var(--card-side) * -0.32) 0; }
+.seat.left.many .slot, .seat.right.many .slot { margin: calc(var(--card-side) * -0.4) 0; }
+/* my row: always one line; with 5+ cards they shrink just enough to fit */
+.seat.bottom { bottom: 6px; }
+.seat.bottom .hand { flex-wrap: nowrap; max-width: 96cqw; gap: 12px; }
+.seat.bottom .slot { width: min(var(--card-me), calc((94cqw - (var(--n) - 1) * 12px) / var(--n))); }
+.seat.bottom .who { flex-direction: row; gap: 6px; }
+.seat.left .slot .pos, .seat.right .slot .pos { right: auto; left: -7px; top: -7px; }
+
+/* ---------- wooden settings boards (bots setup, online, lobby) ---------- */
+.screen .board {
+  position: relative; border: 5px solid var(--ink); border-radius: 26px; padding: 24px 24px 22px;
+  background:
+    radial-gradient(circle at 14px 14px, #6b7b86 0 4px, #2a1608 4px 5.5px, transparent 6px),
+    radial-gradient(circle at calc(100% - 14px) 14px, #6b7b86 0 4px, #2a1608 4px 5.5px, transparent 6px),
+    radial-gradient(circle at 14px calc(100% - 14px), #6b7b86 0 4px, #2a1608 4px 5.5px, transparent 6px),
+    radial-gradient(circle at calc(100% - 14px) calc(100% - 14px), #6b7b86 0 4px, #2a1608 4px 5.5px, transparent 6px),
+    linear-gradient(#f6e3bd, #ecd2a0);
+  box-shadow: inset 0 0 0 9px #b8743a, inset 0 0 0 12px #8a4f22, inset 0 0 0 14px var(--ink), inset 0 18px 24px -12px rgba(120,70,20,.35), 0 8px 0 var(--ink), 0 14px 26px rgba(0,0,0,.35);
+}
+.screen .board::before, .screen .board::after { content: ''; position: absolute; width: 74px; height: 40px; background: radial-gradient(ellipse at 30% 60%, #4fb845 0 45%, transparent 47%), radial-gradient(ellipse at 70% 40%, #3a9634 0 42%, transparent 44%); pointer-events: none; }
+.screen .board::before { top: -16px; left: -14px; transform: rotate(-20deg); }
+.screen .board::after { bottom: -14px; right: -14px; transform: rotate(160deg); }
+.screen .board > * { position: relative; }
+.screen .board .field .ribbon {
+  align-self: center; font-family: var(--display); font-weight: 400; font-size: 1rem; padding: 4px 16px; border-radius: 10px;
+  color: #ffe38a; text-shadow: 0 2px 0 var(--ink);
+  background: linear-gradient(#c58447, #a8662f); border: 3px solid var(--ink);
+  box-shadow: inset 0 2px 0 rgba(255,220,160,.45), 0 3px 0 var(--ink);
+}
+.screen .board .seg button, .screen .board .rp-count button {
+  background: linear-gradient(#e9c58e, #d9ad6c); border: 3px solid #6b3c16; color: #4a2610; border-radius: 12px;
+  box-shadow: inset 0 2px 0 rgba(255,240,200,.7), inset 0 -3px 0 rgba(120,70,20,.35), 0 3px 0 #6b3c16;
+}
+.screen .board .seg button[aria-pressed="true"], .screen .board .rp-count button[aria-pressed="true"] {
+  background: linear-gradient(#a6e36b, #4fb845 55%, #2f8a2a); color: #fff; border-color: #1f5a1b; text-shadow: 0 2px 0 #1f5a1b;
+  box-shadow: inset 0 3px 0 rgba(255,255,255,.45), 0 3px 0 #1f5a1b;
+}
+.screen .board .rp-n { color: #6b3c16; }
+.screen .board .hint, .screen .board p { color: #4a2610; }
+.screen .plank.gold[data-act-ui="start-bots"], .screen .plank.gold[data-lobby="start"] {
+  background: linear-gradient(#b6f07a, #4fb845 55%, #2f8a2a); color: #fff; border-color: var(--ink); text-shadow: 0 3px 0 #1f5a1b;
+}

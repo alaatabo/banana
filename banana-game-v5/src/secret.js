@@ -12,7 +12,7 @@ import { FRAME_SCALE } from './avatars.js';
 
 export const GIFTS = [
   ...FRAME_SCALE.map((_, i) => ({ id: 'f' + (i + 1), kind: 'frame', src: `gifts/frame${i + 1}.webp` })),
-  ...[1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: 'gt' + n, kind: 'table', src: `gifts/table${n}.webp` })),
+  ...[1, 2, 3, 4, 5, 6].map((n) => ({ id: 'gt' + n, kind: 'table', src: `gifts/table${n}.webp` })),
   ...[1, 2, 3, 4, 5].map((n) => ({ id: 'g' + n, kind: 'avatar', src: `gifts/av${n}.webp` })),
 ];
 export const giftById = (id) => GIFTS.find((g) => g.id === id);
