@@ -907,7 +907,7 @@ function actionsHTML() {
       return `<button class="plank wood" data-a="draw">اسحب</button>
         <button class="plank wood" data-a="take" ${top && CARD_INFO[top].tier !== 'cmd' ? '' : 'disabled'}>خد من الأرض</button>
         ${snapBtn()}
-        ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="gr1">Guard</button>` : ''}
+        ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank guard-btn" style="background:var(--pink);color:#fff" data-ui="gr1">Guard</button>` : ''}
         ${!v.lastLap || v.banana ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : v.banana ? 'بانانا اتقالت' : `بانانا بعد ${3 - me.turnsPlayed} ${3 - me.turnsPlayed === 1 ? 'دور' : 'أدوار'}`}</button>` : ''}`;
     }
     case 'hold':

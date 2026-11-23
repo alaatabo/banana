@@ -584,3 +584,12 @@ body::before { content: ''; position: fixed; inset: -30px; background: #123826 u
 .seat.top .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateY(25%) scale(1.3); }
 .seat.left .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateX(25%) rotate(0deg) scale(1.05); }
 .seat.right .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateX(-25%) rotate(0deg) scale(1.05); }
+/* Guard and BANANA share one row */
+.actions:has(.guard-btn) .guard-btn { flex: 1 1 30%; min-height: 46px; padding: 8px; }
+.actions:has(.guard-btn) .banana-btn { flex: 2 1 55%; }
+/* opponent across the table sits a bit higher, side players too, so nobody covers the deck and floor */
+.seat.top { top: 2px; gap: 2px; }
+.seat.top .who { transform: scale(.92); transform-origin: bottom center; }
+.seat.left, .seat.right { top: 17%; }
+/* the deck and floor always start below the top player's cards */
+.center { top: max(calc(47% - 85px), calc(var(--card-top) * 1.4 + 128px)); transform: none; }
