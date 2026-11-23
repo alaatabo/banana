@@ -39,6 +39,7 @@ const ui = {
   lit: {}, // slotId -> until (glow after a move)
   ghost: {}, // slotId -> until (hidden while a card flies in)
 };
+if (/[?&]fast/.test(location.search)) window.__ui = ui; // tests only
 
 // ------------------------------------------------------------ helpers
 const cardName = (n) => (CARD_INFO[n].tier === 'cmd' ? CARD_INFO[n].label[0] + CARD_INFO[n].label.slice(1).toLowerCase() : CARD_INFO[n].num);
@@ -105,7 +106,6 @@ function onUpdate(view, events) {
   // thrown bananas play right away, outside the game's step-by-step queue
   const emotes = events.filter((e) => e.type === 'emote');
   if (emotes.length) { emotes.forEach(throwBanana); events = events.filter((e) => e.type !== 'emote'); }
-  if (!events.length && ui.view) return;
   updQ.push([view, events]); pumpUpdates();
 }
 // What the choose option does, told to everyone after the choice.
@@ -123,31 +123,32 @@ const CHOSE_AR = {
 // with the Guard question instead (see guardBox).
 const TARGETING = new Set(['swap', 'buzz', 'curse', 'tornado', 'plus', 'freeze', 'choose', 'copy']);
 function gateOf(e) {
-  const by = (pid) => (pid === ui.me ? 'إنت' : pname(pid));
-  const will = (pid) => (pid === ui.me ? 'هتنفذ' : 'هينفذ');
-  if (e.type === 'effect' && CARD_DESC[e.card] && !TARGETING.has(e.card)) {
-    return { card: e.card, title: `${by(e.pid)} ${will(e.pid)} ${cardName(e.card)}`, desc: CARD_DESC[e.card] };
+  const fast = /[?&]fast/.test(location.search);
+  const nm = (c) => cardName(c);
+  // every command is shown by its card flying to whoever it's played on
+  if (e.type === 'effect' && CARD_INFO[e.card] && (CARD_INFO[e.card].tier === 'cmd' || CARD_DESC[e.card]) && !TARGETING.has(e.card)) {
+    return { fly: { card: e.card, label: nm(e.card) + (e.viaCopy ? ' · Copy' : ''), to: [e.pid] } };
   }
-  if (e.type === 'copied' && !TARGETING.has(e.card)) {
-    return { card: e.card, title: `${by(e.pid)} ${will(e.pid)} ${cardName(e.card)} بـ Copy`, desc: CARD_DESC[e.card] };
-  }
-  if (e.type === 'chose' && (e.option === 'peek' || e.option === 'activate')) {
-    return { card: 'choose', title: `${by(e.pid)} ${will(e.pid)} ${OPTION_AR[e.option][0]} من Choose`, desc: CHOSE_AR[e.option][1] };
-  }
+  if (e.type === 'copied' && !TARGETING.has(e.card)) return { fly: { card: 'copy', label: `Copy · ${nm(e.card)}`, to: [e.pid] } };
+  if (e.type === 'chose' && e.option === 'peek') return { fly: { card: 'choose', label: 'Choose · Peek', to: 'deck' } };
+  if (e.type === 'chose' && e.option === 'activate') return { fly: { card: 'choose', label: 'Choose · Activate', to: [e.pid] } };
   if (e.type === 'targeted') {
-    const targets = e.targets || [e.target];
-    if (targets.includes(ui.me) && e.by !== ui.me) return null; // my own box asks about the Guard
-    const name = e.option ? `${OPTION_AR[e.option][0]} من Choose` : cardName(e.card);
-    const on = targets.length === 1 && targets[0] === e.by ? (e.by === ui.me ? 'على نفسك' : 'على نفسه') : 'على ' + targets.map(by).join(' و');
-    return { card: e.card, title: `${by(e.by)} ${will(e.by)} ${name}${e.viaCopy ? ' بـ Copy' : ''} ${on}`, desc: e.option ? CHOSE_AR[e.option][1] : CARD_DESC[e.card] };
+    const ts = e.targets || [e.target];
+    const label = e.option ? `Choose · ${OPTION_EN[e.option] || e.option}` : nm(e.card) + (e.viaCopy ? ' · Copy' : '');
+    return { fly: { card: e.option ? 'choose' : e.card, label, to: ts, hot: ts.includes(ui.me) && e.by !== ui.me } };
   }
-  if (e.type === 'guarded' && e.self && e.ok) {
-    return { card: 'guard', title: `${by(e.pid)} رفض ${cardName(e.card)} بالـ Guard`, desc: 'الأمر اتلغى، والـ Guard راح الأرض' };
-  }
+  if (e.type === 'guarded' && e.self && e.ok) return { fly: { card: 'guard', label: 'Guard', to: [e.pid] } };
+  if (e.type === 'banana') return { after: fast ? 200 : 2400 };
   // End of a round / the game: let the last move finish and be seen first.
-  if (e.type === 'banana') return { after: /[?&]fast/.test(location.search) ? 200 : 2400 };
-  if (e.type === 'roundEnd' || e.type === 'gameOver') return { pause: /[?&]fast/.test(location.search) ? 200 : 1600 };
+  if (e.type === 'roundEnd' || e.type === 'gameOver') return { pause: fast ? 200 : 1600 };
   return null;
+}
+const OPTION_EN = { observe: 'Observe', shuffle: 'Shuffle', skip: 'Skip', peek: 'Peek', activate: 'Activate' };
+function flyCmd(f) {
+  const from = $app.querySelector('[data-pile="discard"]');
+  const to = f.to === 'deck' ? [$app.querySelector('[data-pile="deck"]')] : f.to.map((pid) => $app.querySelector(`[data-who="${pid}"] .avatar`));
+  sfx(FX_CARD[f.card] || 'magic');
+  return FX.cmdFly(from, to, f.card, f.label, { hot: f.hot });
 }
 
 const fxIdle = () => new Promise((res) => FX.enqueue(() => res()));
@@ -181,7 +182,8 @@ async function pumpUpdates() {
         await fxIdle();
         if (gen !== ui.gen) return;
         if (g.after) { await FX.wait(g.after); if (gen !== ui.gen) return; rest = rest.slice(k + 1); continue; }
-        await announce(g.card, g.title, g.hot, g.desc);
+        if (g.fly) { if (!/[?&]fast/.test(location.search)) await flyCmd(g.fly); }
+        else if (g.card) await announce(g.card, g.title, g.hot, g.desc);
         if (gen !== ui.gen) return;
         rest = rest.slice(k + 1);
       }
@@ -393,7 +395,6 @@ function soundFor(e) {
     case 'tornado': return sfx('tornado');
     case 'roundStart': return sfx('deal');
     case 'reveal': case 'peeked': return sfx('flip');
-    case 'effect': return sfx(FX_CARD[e.card] || 'magic');
     case 'targeted': if ((e.targets || [e.target]).includes(ui.me) && e.by !== ui.me) sfx('alert'); return;
     case 'guarded': if (e.ok) sfx('guard'); return;
     case 'guardUsed': if (e.ok) sfx('guard'); return;
@@ -401,6 +402,18 @@ function soundFor(e) {
     case 'roundEnd': return sfx('drum');
     case 'gameOver': return sfx((e.winners || []).includes(ui.me) ? 'win' : 'lose');
   }
+}
+
+// "كارت رقم 2 عند بيبو" — slot numbers as shown on the table
+function slotNo(owner, slotId) {
+  const p = ui.view && ui.view.players.find((x) => x.id === owner);
+  const i = p ? p.slots.findIndex((x) => x.id === slotId) : -1;
+  return i >= 0 ? i + 1 : null;
+}
+function cardAt(owner, slotId, me = false) {
+  const k = slotNo(owner, slotId);
+  const who = owner === ui.me ? (me ? 'كارتك' : 'كارتك') : `كارت ${pname(owner)}`;
+  return k ? `${who} رقم ${k}` : who;
 }
 
 function handleEvent(e) {
@@ -426,19 +439,19 @@ function handleEvent(e) {
       banner('يلا!', 900);
       break;
     case 'ready': if (e.pid !== ui.me) log(`${n(e.pid)} جاهز`); break;
-    case 'peeked': log(e.pid === e.owner ? `${n(e.pid)} بص على كارت من كروته` : `${n(e.pid)} بص على كارت عند ${n(e.owner)}`); break;
-    case 'targeted': if (e.target !== e.by) log(`${n(e.by)} لعب ${cardName(e.card)} على ${n(e.target)}`); break;
+    case 'peeked': log(e.pid === e.owner ? `${n(e.pid)} بص على ${e.owner === ui.me ? 'كارتك' : 'كارته'} رقم ${slotNo(e.owner, e.slotId) || ''}` : `${n(e.pid)} بص على ${cardAt(e.owner, e.slotId)}`); break;
+    case 'targeted': { const ts = (e.targets || [e.target]).filter((t) => t !== e.by); if (ts.length) log(`${n(e.by)} لعب ${e.option ? 'Choose · ' + OPTION_AR[e.option][0] : cardName(e.card)}${e.viaCopy ? ' بـ Copy' : ''} على ${ts.map(n).join(' و')}`); break; }
     case 'discarded': if (!e.timeout) log(e.replaced ? `${n(e.pid)} بدّل ورمى ${cardName(e.card)}` : `${n(e.pid)} رمى ${cardName(e.card)}`); else log(`${n(e.pid)} خلص وقته`); break;
     case 'took': log(`${n(e.pid)} خد ${cardName(e.card)} من الأرض`); ui.heldPublic = { pid: e.pid, card: e.card }; break;
     case 'snap': log(e.ok ? `${n(e.pid)} بصّر ${cardName(e.card)} ✓` : e.penalty ? `${n(e.pid)} بصّر غلط (${cardName(e.card)}) ولبس ${cardName(e.penalty)}${e.under ? ' اللي كان تحت الأمر' : ''}` : `${n(e.pid)} بصّر غلط (${cardName(e.card)})`); break;
     case 'banana': ui.bananaCall = { pid: e.pid, at: Date.now() }; setTimeout(() => { if (ui.bananaCall && Date.now() - ui.bananaCall.at >= 2300) { ui.bananaCall = null; render(); } }, 2400); log(`${n(e.pid)} قال بانانا — كل واحد ليه دور أخير`); break;
     case 'effect': if (CARD_INFO[e.card].tier === 'cmd') log(`${n(e.pid)} شغّل ${cardName(e.card)}${e.viaCopy ? ' (Copy)' : ''}`); break;
-    case 'gave': log(`${n(e.pid)} لبس ${cardName(e.card)}`); break;
-    case 'swapped': log(`اتبدل كارت بين ${n(e.pa)} و${n(e.pb)}`); break;
+    case 'gave': log(`${n(e.pid)} لبس ${cardName(e.card)} في الخانة رقم ${slotNo(e.pid, e.slotId) || ''}`); break;
+    case 'swapped': log(`اتبدل ${cardAt(e.pa, e.a)} مع ${cardAt(e.pb, e.b)}`); break;
     case 'shuffled': log(`كروت ${n(e.pid)} اتخلطت`); break;
     case 'tornado': log(`إعصار غيّر كروت ${n(e.pid)}`); break;
-    case 'plus': log(`+5 على خانة عند ${n(e.owner)}`); break;
-    case 'freeze': log(`خانة عند ${n(e.owner)} اتجمدت`); break;
+    case 'plus': log(`+5 على ${cardAt(e.owner, e.slotId)}`); break;
+    case 'freeze': log(`${cardAt(e.owner, e.slotId)} اتجمد ❄️`); break;
     case 'unfreeze': log(`التجميد خلص عند ${n(e.owner)}`); break;
     case 'guardUsed': log(e.ok ? `${n(e.pid)} استخدم Guard وشال ${e.what === 'plus' ? '+5' : 'التجميد'}` : `${n(e.pid)} كشف كارت غلط ولبس ${cardName(e.penalty || 'n0')}`); break;
     case 'guarded':
@@ -460,7 +473,7 @@ function handleEvent(e) {
       if (e.taken) log(`${cardName(e.card)} اتاخد من الأرض — قوته راحت`);
       else if (e.card === 'guard') log('الـ Guard مالقاش +5 ولا تجميد يشيله');
       break;
-    case 'cleared': log(e.card === 'guard' ? `${n(e.pid)} شال ${e.what === 'plus' ? '+5' : 'التجميد'} بالـ Guard` : `${n(e.pid)} استخدم Clear`); break;
+    case 'cleared': log(e.card === 'guard' ? `${n(e.pid)} شال ${e.what === 'plus' ? '+5' : 'التجميد'} من ${cardAt(e.pid, e.slotId)} بالـ Guard` : `${n(e.pid)} استخدم Clear على ${cardAt(e.pid, e.slotId)}`); break;
     case 'roundEnd': ui.lastRoundEnd = e; break;
     case 'gameOver': ui.gameOver = e; break;
   }
@@ -695,6 +708,7 @@ function slotHTML(s, owner, opts = {}) {
   if (s.frozen || s.locked) cls.push('frozen');
   if (showing && now - rv.start < 350) cls.push('revealed');
   if (showing) cls.push('known');
+  if (showing && owner !== ui.me) cls.push('open');
   if (opts.pickable) cls.push('pickable');
   if (opts.picked) cls.push('picked');
   if (ui.lit[s.id] > now) cls.push('lit');
@@ -703,7 +717,7 @@ function slotHTML(s, owner, opts = {}) {
   return `<div class="${cls.join(' ')}" data-slot="${s.id}" data-owner="${owner}" ${opts.pickable ? 'role="button" tabindex="0"' : ''}>
     <i class="plk"></i>${face}
     ${(s.markers || []).map((m, i) => `<span class="mk" style="--i:${i}">${cardSVG(m)}</span>`).join('')}
-    ${s.freezeCard ? `<span class="mk fz">${cardSVG(s.freezeCard)}<b>${s.frozen}</b></span>` : ''}
+    ${s.freezeCard ? `<span class="mk fz" style="--i:${(s.markers || []).length}">${cardSVG(s.freezeCard)}<b>${s.frozen}</b></span>` : ''}
     ${s.locked ? '<span class="badge freeze-b">مقفول</span>' : ''}
     ${opts.pos ? `<span class="pos">${opts.pos}</span>` : ''}
   </div>`;
@@ -769,6 +783,7 @@ function statusText() {
     case 'hold': return p.from === 'deck' ? 'بدّله بكارت من كروتك، أو ارميه' : 'اختار الكارت اللي هتبدّله';
     case 'extra': return sel.extraIdx == null ? 'Extra: اختار كارت من الاتنين' : 'اضغط على كارت تبدّله، أو ارمي';
     case 'snapWindow': return `معاك <b>${cardName(p.top)}</b>؟ دوس على كارتك بسرعة وبصّر!`;
+    case 'guard': return `<b>${esc(pname(p.by))}</b> هيعمل ${p.option ? 'Choose · ' + (OPTION_EN[p.option] || '') : cardName(p.card)} عليك! معاك Guard توقفه؟`;
     case 'target': {
       if (p.step === 'tornadoPick') return `الكومة فيها ${p.spec.n} بس — اختار ${p.spec.n} كروت تتغيّر`;
       if (p.spec.type === 'swap' && sel.mine) return 'دلوقتي اختار كارت عند لاعب تاني';
@@ -797,6 +812,7 @@ function seatHTML(o, pos, pick, picked, pplayers) {
   if (partner) cls.push('partner');
   if (pplayers.has(o.id)) cls.push('pickable');
   if (o.slots.length > 4) cls.push('many');
+  if (waiting && v.waitingKind === 'guard') cls.push('hit');
   const isMe = o.id === ui.me;
   const slots = o.slots.map((s, i) => slotHTML(s, o.id, { pickable: pick.has(s.id), picked: picked.has(s.id), pos: i + 1 })).join('');
   const name = isMe ? 'إنت' : esc(o.name);
@@ -883,6 +899,8 @@ function actionsHTML() {
   switch (p.kind) {
     case 'ready':
       return p.answered ? '' : '<button class="plank gold banana-btn" data-a="ready">حفظتهم — جاهز</button>';
+    case 'guard':
+      return sel.mode === 'guard' ? '<button class="plank cream" data-ui="guard-cancel">رجوع</button>' : `<button class="plank cream" data-a="noGuard">كمّل</button><button class="plank" style="background:var(--pink);color:#fff" data-ui="guard-mode">أوقفه بالـ Guard</button>`;
     case 'turn': {
       const canBanana = !v.banana && !v.lastLap && me.turnsPlayed >= 3;
       const top = v.discardTop;
@@ -964,18 +982,6 @@ function sheetHTML() {
   if (p.kind === 'hold') return '';
   if (p.kind === 'extra') {
     return `<div class="hold-show">${p.cards.map((c, i) => `<div class="float-card small ${ui.sel.extraIdx === i ? 'sel' : ''}" data-extra="${i}" role="button" tabindex="0">${cardSVG(c.name)}</div>`).join('')}</div>`;
-  }
-  if (p.kind === 'guard' && ui.sel.mode !== 'guard') {
-    // Same box as the announcement, with the Guard question under it.
-    const name = p.option ? `${OPTION_AR[p.option][0]} من Choose` : cardName(p.card);
-    const desc = p.option ? CHOSE_AR[p.option][1] : (CARD_DESC[p.card] || '');
-    return `<div class="sheet-bg guardbox-bg"><div class="announce hot guardbox">
-      <div class="a-card">${cardSVG(p.card)}</div>
-      <div class="a-title">${esc(pname(p.by))} هينفذ ${name}${p.viaCopy ? ' بـ Copy' : ''} عليك!</div>
-      <div class="a-desc">${esc(desc)}</div>
-      <div class="gb-q">معاك <b>Guard</b> توقفه؟ <small>لو كشفت كارت غلط هتلبس كارت والأمر هيتنفذ</small></div>
-      <div class="gb-row"><button class="plank cream" data-a="noGuard">لا — كمّل</button><button class="plank" style="background:var(--pink);color:#fff" data-ui="guard-mode">آه، أوقفه</button></div>
-    </div></div>`;
   }
   if (p.kind === 'delegate') {
     if (p.answered) return '';
@@ -1251,6 +1257,7 @@ $app.addEventListener('click', (ev) => {
   }
   if (d.ui === 'snap-mode') { ui.sel = ui.sel.mode === 'snap' ? {} : { ...ui.sel, mode: 'snap' }; return render(); }
   if (d.ui === 'guard-mode') { ui.sel = { mode: 'guard' }; return render(); }
+  if (d.ui === 'guard-cancel') { ui.sel = {}; return render(); }
   if (d.ui === 'sound') { setSound(!soundOn()); if (soundOn()) sfx('tap'); return render(); }
   if (d.ui === 'share-code') { const c = ui.conn && ui.conn.room; if (c) { const t = `تعالى نلعب بانانا 🍌\nدوس على اللينك وهتدخل الأوضة على طول:\n${location.origin}${location.pathname}?room=${c}`; if (navigator.share) navigator.share({ text: t }).catch(() => {}); else if (navigator.clipboard) navigator.clipboard.writeText(t).then(() => { log('الكود اتنسخ'); render(); }).catch(() => {}); } return; }
   if (d.ui === 'selfg') { ui.sel = ui.sel.mode === 'selfg' ? {} : { mode: 'selfg' }; return render(); }

@@ -557,3 +557,30 @@ body::before { content: ''; position: fixed; inset: -30px; background: #123826 u
 .screen .plank.gold[data-act-ui="start-bots"], .screen .plank.gold[data-lobby="start"] {
   background: linear-gradient(#b6f07a, #4fb845 55%, #2f8a2a); color: #fff; border-color: var(--ink); text-shadow: 0 3px 0 #1f5a1b;
 }
+/* flying command cards */
+.cmdfly { position: fixed; left: 0; top: 0; z-index: 68; pointer-events: none; filter: drop-shadow(0 6px 8px rgba(0,0,0,.45)); will-change: transform; }
+.cmdfly .card-img { width: 100%; height: 100%; border-radius: 7px; box-shadow: 0 0 0 2px var(--banana), 0 0 14px 4px rgba(255,216,77,.8); }
+.cmdfly.hot .card-img { box-shadow: 0 0 0 2px #ff4f6e, 0 0 16px 5px rgba(255,79,110,.85); }
+.cf-lbl { position: absolute; left: 50%; top: 100%; transform: translate(-50%, 4px) scale(.62); white-space: nowrap; font-family: var(--latin), sans-serif; font-weight: 900; font-size: .95rem; color: var(--ink); background: var(--banana); border: 2px solid var(--ink); border-radius: 9px; padding: 1px 8px; }
+.cmdfly.hot .cf-lbl { background: #ff4f6e; color: #fff; }
+/* the player a command is aimed at, while he decides about the Guard */
+.seat.hit .avatar { box-shadow: 0 0 0 4px #ff4f6e, 0 0 18px 6px rgba(255,79,110,.85) !important; animation: hitpulse .9s ease-in-out infinite !important; }
+@keyframes hitpulse { 50% { box-shadow: 0 0 0 4px #ff4f6e, 0 0 6px 2px rgba(255,79,110,.5); } }
+/* Plus and Freeze cards sit together on the slot's lower corner, stacked */
+.slot .mk, .slot .mk.fz { top: auto; bottom: calc(-16% + var(--i, 0) * 12%); inset-inline-start: auto; inset-inline-end: calc(-20% + var(--i, 0) * 8%); width: 48%; transform: rotate(calc(12deg - var(--i, 0) * 7deg)); z-index: calc(3 + var(--i, 0)); }
+.seat:not(.bottom) .slot .mk { width: 38%; }
+/* side columns: no overlap (they just start higher) */
+.seat.left .slot, .seat.right .slot { margin: calc(var(--card-side) * -0.2 + 4px) 0; }
+.seat.left.many .slot, .seat.right.many .slot { margin: calc(var(--card-side) * -0.2 + 1px) 0; }
+/* another player's card shown face up: it grows (and stands upright) so everyone can read it */
+.seat:not(.bottom) .slot { transition: transform .3s ease; }
+.seat:not(.bottom) .slot.open { z-index: 30; }
+.seat.top .slot.open { transform: translateY(40%) scale(1.9); }
+.seat.left .slot.open { transform: translateX(70%) rotate(0deg) scale(1.75); }
+.seat.right .slot.open { transform: translateX(-70%) rotate(0deg) scale(1.75); }
+.seat:not(.bottom) .slot.open .card-img { box-shadow: 0 0 0 2px var(--sky), 0 6px 14px rgba(0,0,0,.45); }
+.seat:not(.bottom) .slot.open .pos { transform: none; }
+/* several cards of one player open at once (Tornado, 15, Golden): grow less so they don't cover each other */
+.seat.top .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateY(25%) scale(1.3); }
+.seat.left .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateX(25%) rotate(0deg) scale(1.05); }
+.seat.right .hand:has(.slot.open ~ .slot.open) .slot.open { transform: translateX(-25%) rotate(0deg) scale(1.05); }

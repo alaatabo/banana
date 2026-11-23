@@ -10,7 +10,7 @@ const QUICK = new Set(['guard', 'snapWindow', 'delegate']);
 
 // How long the players' screens need to show what just happened (card moves,
 // command announcements). Nobody — bot or timer — moves on before that.
-const ANNOUNCE_MS = 3700;
+const ANNOUNCE_MS = 1900;
 function paceOf(e) {
   switch (e.type) {
     case 'effect': return ANNOUNCE_MS;
@@ -132,6 +132,14 @@ export class Host {
     const who = this.waitingOn();
     const bot = who.find((q) => this.isBot(q));
     if (bot) {
+      // A bot that won't snap says so at once: nobody waits on it.
+      if (p.kind === 'snapWindow') {
+        let a = null;
+        try { a = this.bots[bot].decide(this.state); } catch (e) { a = null; }
+        if (!a || a.t !== 'snap') { this.timer = setTimeout(() => this.botMove(bot, a || { t: 'pass' }), 30); return; }
+        this.timer = setTimeout(() => this.botMove(bot, a), 350 + this.slack());
+        return;
+      }
       const delay = p.kind === 'roundOver' ? Math.max(this.botDelay, 4000 * (this.botDelay >= 300)) : p.kind === 'ready' ? 300 : QUICK.has(p.kind) ? Math.min(600, this.botDelay) : this.botDelay;
       this.timer = setTimeout(() => this.botMove(bot), delay + this.slack());
       return;
@@ -163,9 +171,9 @@ export class Host {
 
   slack() { return this.pacing ? Math.max(0, this.busyUntil - Date.now()) : 0; }
 
-  botMove(pid) {
-    let a;
-    try { a = this.bots[pid].decide(this.state); } catch (e) { this.onError(e); a = { t: 'timeout' }; }
+  botMove(pid, pre = null) {
+    let a = pre;
+    if (!a) try { a = this.bots[pid].decide(this.state); } catch (e) { this.onError(e); a = { t: 'timeout' }; }
     try {
       act(this.state, pid, a || { t: 'timeout' });
     } catch (e) {

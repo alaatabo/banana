@@ -146,3 +146,37 @@ export function bananaThrow(fromEl, toEl, { onHit } = {}) {
     if (onHit) onHit();
   });
 }
+
+// A command card that everyone should follow: it rises from the floor, grows
+// with its name under it, then flies to whoever it is played on.
+export function cmdFly(fromEl, toEls, face, label, { hot = false } = {}) {
+  if (!fromEl || reduce) return wait(reduce ? 400 : 0);
+  const a = fromEl.getBoundingClientRect();
+  const ax = a.left + a.width / 2, ay = a.top + a.height / 2;
+  const w = 64, h = w * 1.4;
+  const targets = (toEls || []).filter(Boolean);
+  const mk = () => {
+    const el = document.createElement('div');
+    el.className = 'cmdfly' + (hot ? ' hot' : '');
+    el.style.width = w + 'px'; el.style.height = h + 'px';
+    el.innerHTML = cardSVG(face) + (label ? `<span class="cf-lbl">${label}</span>` : '');
+    fxLayer().appendChild(el);
+    return el;
+  };
+  const at = (x, y, sc) => `translate(${x - w / 2}px, ${y - h / 2}px) scale(${sc})`;
+  const cx = window.innerWidth / 2, cy = Math.min(window.innerHeight * 0.42, ay);
+  const runs = (targets.length ? targets : [null]).map((t) => {
+    const el = mk();
+    const frames = [{ transform: at(ax, ay, 0.8), opacity: 0.6, offset: 0 }, { transform: at(cx, cy, 1.7), opacity: 1, offset: 0.25 }, { transform: at(cx, cy, 1.7), opacity: 1, offset: 0.55 }];
+    if (t) {
+      const b = t.getBoundingClientRect();
+      const bx = b.left + b.width / 2, by = b.top + b.height / 2;
+      frames.push({ transform: at(bx, by, 0.9), opacity: 1, offset: 0.88 }, { transform: at(bx, by, 0.5), opacity: 0, offset: 1 });
+    } else frames.push({ transform: at(cx, cy, 1.4), opacity: 0, offset: 1 });
+    return el.animate(frames, { duration: 1500, easing: 'ease-in-out', fill: 'forwards' }).finished.catch(() => {}).then(() => {
+      el.remove();
+      if (t) t.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }], { duration: 350 });
+    });
+  });
+  return Promise.all(runs);
+}
