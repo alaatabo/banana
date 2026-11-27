@@ -169,7 +169,7 @@ export class Bot {
   }
 
   extra(v, p) {
-    if (v.discardTop && p.snapsLeft > 0) {
+    if (false) {
       const s = this.knownMatch(v, v.discardTop);
       if (s) return { t: 'snap', slotId: s.id };
     }

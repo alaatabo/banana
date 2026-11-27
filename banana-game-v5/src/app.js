@@ -914,7 +914,7 @@ function actionsHTML() {
       return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
     case 'extra':
       return `${sel.extraIdx != null ? `<button class="plank wood" data-ui="extra-throw">ارمي${effectNote(p.cards[sel.extraIdx].name)}</button>` : ''}
-        ${p.snapsLeft > 0 ? snapBtn() : ''}`;
+        `;
     case 'snapWindow':
       return ''; // no question: just tap your matching card while the floor card glows
     case 'target': {

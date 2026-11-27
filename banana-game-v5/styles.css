@@ -593,3 +593,7 @@ body::before { content: ''; position: fixed; inset: -30px; background: #123826 u
 .seat.left, .seat.right { top: 17%; }
 /* the deck and floor always start below the top player's cards */
 .center { top: max(calc(47% - 85px), calc(var(--card-top) * 1.4 + 128px)); transform: none; }
+/* only a player's own picture, name and cards take taps (the top seat's wide box no longer catches taps meant for the side players) */
+.seat { pointer-events: none; }
+.seat .who, .seat .hand, .seat .slot, .seat .nmr, .seat .tag { pointer-events: auto; }
+.seat .hand { width: max-content; margin-inline: auto; }

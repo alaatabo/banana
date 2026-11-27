@@ -1014,6 +1014,7 @@ function extraAction(state, pid, a, pend) {
     return;
   }
   if (a.t === 'snap') {
+    fail('no snapping during an Extra turn');
     if (ctx.snaps >= 2) fail('no more snaps');
     state.pending = null;
     const ok = doSnap(state, pid, a.slotId);
