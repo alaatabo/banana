@@ -20,8 +20,24 @@ function ac() {
   if (ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
 }
+// recorded sounds (decoded once, after the first touch)
+const SAMPLES = { monkeyRec: 'sounds/monkey.mp3' };
+const bufs = {};
+function loadSamples() {
+  for (const [k, url] of Object.entries(SAMPLES)) {
+    if (bufs[k] !== undefined) continue;
+    bufs[k] = null;
+    fetch(url).then((r) => r.arrayBuffer()).then((a) => new Promise((res, rej) => ctx.decodeAudioData(a, res, rej))).then((b) => { bufs[k] = b; }).catch(() => {});
+  }
+}
+function sample(k, vol = 1) {
+  if (!bufs[k]) return false;
+  const src = ctx.createBufferSource(); src.buffer = bufs[k];
+  const g = ctx.createGain(); g.gain.value = vol; src.connect(g); g.connect(master); src.start();
+  return true;
+}
 // unlock on the first touch
-['pointerdown', 'keydown'].forEach((t) => window.addEventListener(t, () => ac(), { once: true, capture: true }));
+['pointerdown', 'keydown'].forEach((t) => window.addEventListener(t, () => { if (ac()) loadSamples(); }, { once: true, capture: true }));
 
 const now = () => ctx.currentTime;
 
@@ -98,7 +114,7 @@ const S = {
   alert: () => { tone({ f: 740, type: 'square', dur: 0.1, vol: 0.12 }); tone({ f: 740, type: 'square', at: 0.16, dur: 0.1, vol: 0.12 }); },
   turn: () => { tone({ f: 784, type: 'sine', dur: 0.15, vol: 0.25 }); tone({ f: 1047, type: 'sine', at: 0.12, dur: 0.3, vol: 0.25 }); },
   tick: () => tone({ f: 1800, type: 'square', dur: 0.03, vol: 0.08 }),
-  banana: () => { tone({ f: 110, f2: 70, type: 'sine', dur: 0.3, vol: 0.6 }); monkey(0.12); },
+  banana: () => { if (!sample('monkeyRec', 1.4)) { tone({ f: 110, f2: 70, type: 'sine', dur: 0.3, vol: 0.6 }); monkey(0.12); } },
   drum: () => { for (let i = 0; i < 8; i++) tone({ f: 130, f2: 80, type: 'sine', at: i * 0.07, dur: 0.08, vol: 0.25 + i * 0.03 }); tone({ f: 90, f2: 50, at: 0.6, dur: 0.4, vol: 0.6 }); },
   win: () => { [523, 659, 784, 1047, 784, 1047].forEach((f, i) => tone({ f, type: 'triangle', at: i * 0.12, dur: i === 5 ? 0.6 : 0.14, vol: 0.25 })); },
   lose: () => { [392, 370, 349, 330].forEach((f, i) => tone({ f, type: 'triangle', at: i * 0.2, dur: i === 3 ? 0.6 : 0.2, vol: 0.2 })); },

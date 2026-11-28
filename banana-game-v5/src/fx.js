@@ -94,9 +94,10 @@ export function enqueue(fn) {
 export const busy = () => pending > 0;
 
 // Big center announcement: the card, who played it on whom, and what it does.
-export function announce({ html, title, desc, hot }) {
+export function announce({ html, title, desc, hot, cc }) {
   const el = document.createElement('div');
   el.className = 'announce' + (hot ? ' hot' : '');
+  if (cc) el.style.setProperty('--cc', cc);
   el.innerHTML = `<div class="a-card">${html}</div><div class="a-title"></div><div class="a-desc"></div>`;
   el.querySelector('.a-title').textContent = title;
   el.querySelector('.a-desc').textContent = desc;

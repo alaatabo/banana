@@ -11,7 +11,7 @@ import { isLocalOnly } from './store.js';
 import * as FX from './fx.js';
 
 const $app = document.getElementById('app');
-const APP_DATE = '٢٣ نوفمبر ٢٠٢٦';
+const APP_DATE = '٢٨ نوفمبر ٢٠٢٦';
 const APP_V = 22; // keep in step with the cache name in sw.js
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('banana.' + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -39,7 +39,7 @@ const ui = {
   lit: {}, // slotId -> until (glow after a move)
   ghost: {}, // slotId -> until (hidden while a card flies in)
 };
-if (/[?&]fast/.test(location.search)) window.__ui = ui; // tests only
+if (/[?&]fast/.test(location.search)) { window.__ui = ui; setTimeout(() => { window.__render = render; }); } // tests only
 
 // ------------------------------------------------------------ helpers
 const cardName = (n) => (CARD_INFO[n].tier === 'cmd' ? CARD_INFO[n].label[0] + CARD_INFO[n].label.slice(1).toLowerCase() : CARD_INFO[n].num);
@@ -247,7 +247,7 @@ function lightUp(ids, cls = 'land') {
 function slotsOf(view, pid) { const p = view && view.players.find((x) => x.id === pid); return p ? p.slots.map((s) => s.id) : []; }
 
 function announce(card, title, onMe = false, desc = null) {
-  return FX.announce({ html: cardSVG(card), title, desc: desc ?? (CARD_DESC[card] || ''), hot: onMe });
+  return FX.announce({ html: cardSVG(card), title, desc: desc ?? (CARD_DESC[card] || ''), hot: onMe, cc: (CARD_INFO[card] && CARD_INFO[card].color) || '#ffb300' });
 }
 
 function animate(events, B, A, oldView) {
@@ -542,38 +542,30 @@ function seg(name, options, value) {
 }
 
 const ICON = {
-  book: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1z"/><path d="M12 6v14"/></svg>',
-  back: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff8e1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
-  trophy: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff8e1" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v4M8 20h8"/></svg>',
-  menu: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff8e1" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg>',
+  book: '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5c3-1 6-1 8 1 2-2 5-2 8-1v14c-3-1-6-1-8 1-2-2-5-2-8-1z"/><path d="M12 6v14"/></svg>',
+  back: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>',
+  trophy: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10v5a5 5 0 0 1-10 0z"/><path d="M7 6H4a3 3 0 0 0 3 4M17 6h3a3 3 0 0 1-3 4M12 14v4M8 20h8"/></svg>',
+  menu: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h14"/></svg>',
   share: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.7l6.8-4M8.6 13.3l6.8 4"/></svg>',
 };
+ICON.snd = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 10.2v3.6c0 .7.5 1.2 1.2 1.2h1.6l1.4 4.1c.2.5.6.8 1.1.8h1.1c.7 0 1.1-.6.9-1.2L9.1 15l7.4 3.6c.8.4 1.5-.2 1.5-1V6.4c0-.8-.7-1.4-1.5-1L8.6 9H4.2C3.5 9 3 9.5 3 10.2z"/><path d="M19.5 9.2c.9.7 1.4 1.7 1.4 2.8s-.5 2.1-1.4 2.8M21.2 6.8c1.5 1.3 2.3 3.1 2.3 5.2s-.8 3.9-2.3 5.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+ICON.mute = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 10.2v3.6c0 .7.5 1.2 1.2 1.2h1.6l1.4 4.1c.2.5.6.8 1.1.8h1.1c.7 0 1.1-.6.9-1.2L9.1 15l7.4 3.6c.8.4 1.5-.2 1.5-1V6.4c0-.8-.7-1.4-1.5-1L8.6 9H4.2C3.5 9 3 9.5 3 10.2z"/><path d="M2 3l20 18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>';
 const BANANA_FACE = '<svg viewBox="0 0 40 40" aria-hidden="true"><path d="M10 34 C 6 22, 12 10, 26 5 C 28 4, 30 6, 29 8 C 20 14, 18 24, 22 32 C 23 36, 12 38, 10 34 Z" fill="#ffd84d" stroke="#2a1608" stroke-width="2.5" stroke-linejoin="round"/><circle cx="17" cy="18" r="2" fill="#2a1608"/><circle cx="22" cy="17" r="2" fill="#2a1608"/><path d="M16 23 q4 3 7 -1" stroke="#2a1608" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 function leafSVG(cls, style) {
   return `<svg class="leaf ${cls}" style="${style}" width="260" height="190" viewBox="-10 -180 270 190" aria-hidden="true"><path d="M0 0 C 30 -70, 110 -150, 250 -170 C 200 -90, 110 -20, 0 0 Z" fill="#43a43b" stroke="#2a1608" stroke-width="5" stroke-linejoin="round"/><path d="M8 -6 C 80 -60, 160 -120, 240 -164" stroke="#2f7d2e" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M70 -40 l 30 -10 M120 -78 l 32 -6 M170 -112 l 30 -2" stroke="#2a1608" stroke-width="3" stroke-linecap="round"/></svg>`;
 }
 const LEAVES = leafSVG('', 'left:-70px;bottom:-30px;transform:rotate(-10deg)') + leafSVG('', 'right:-80px;bottom:60px;transform:scaleX(-1) rotate(-14deg)') + leafSVG('', 'left:-90px;top:-40px;transform:rotate(30deg) scale(.7)') + leafSVG('', 'right:-90px;top:-50px;transform:scaleX(-1) rotate(30deg) scale(.7)');
 
-// The jungle picture, with the monkeys' heads and tails as separate layers
-// so they can move. Placed exactly like the picture (cover, top-centred).
-const LAYERS = [
-  // id, monkey, x, y, w, h (in the 1024×1536 picture), pivot
-  ['L_tail', 'L', 90, 304, 71, 132, '92% 80%'],
-  ['L_head', 'L', 143, 187, 192, 143, '50% 98%'],
-  ['R_tail', 'R', 910, 641, 83, 127, '2% 66%'],
-  ['R_head', 'R', 744, 495, 191, 148, '53% 98%'],
-];
-const MONKEY_BODY = { L: [150, 300, 190, 190], R: [745, 620, 175, 180] };
 const pct = (v, of) => `${(v / of * 100).toFixed(3)}%`;
+// Home picture (943×1668) with the parrot and the monkey as separate moving pieces.
 function jungleStage(interactive) {
-  const lay = LAYERS.map(([id, m, x, y, w, h, o]) => `<img class="lay ${id}" data-mk="${interactive ? m : ''}" src="cards/${id}.webp" alt="" draggable="false" style="left:${pct(x, 1024)};top:${pct(y, 1536)};width:${pct(w, 1024)};transform-origin:${o}">`).join('');
-  const hits = interactive ? Object.entries(MONKEY_BODY).map(([m, [x, y, w, h]]) => `<i class="mk-hit" data-mk="${m}" style="left:${pct(x, 1024)};top:${pct(y, 1536)};width:${pct(w, 1024)};height:${pct(h, 1536)}"></i>`).join('') : '';
-  return `<div class="stage" aria-hidden="true"><div class="stage-in"><img class="stage-bg" src="cards/bg-jungle-base.webp" alt="" draggable="false">${hits}${lay}</div></div>`;
+  const mk = (m) => (interactive ? `data-mk="${m}"` : '');
+  return `<div class="stage" aria-hidden="true"><div class="stage-in"><img class="stage-bg" src="cards/ui/home-bg.webp" alt="" draggable="false"><img class="lay parrot" ${mk('L')} src="cards/ui/parrot.webp" alt="" draggable="false"><img class="lay monkey" ${mk('R')} src="cards/ui/monkey.webp" alt="" draggable="false"></div></div>`;
 }
 
 function screen(inner, { photo = false, cls = '' } = {}) {
-  if (photo) return `<div class="screen photo ${cls}">${jungleStage(cls === 'home')}<div class="screen-in">${inner}</div></div>`;
-  return `<div class="screen jungle">${LEAVES}<div class="screen-in">${inner}</div></div>`;
+  if (photo) return `<div class="screen photo home2 ${cls}">${jungleStage(cls === 'home')}<div class="screen-in">${inner}</div></div>`;
+  return `<div class="screen jungle"><div class="screen-in">${inner}</div></div>`;
 }
 const backBtn = (to) => `<button class="round" data-go="${to}" aria-label="رجوع" style="align-self:flex-start">${ICON.back}</button>`;
 
@@ -589,23 +581,22 @@ function avatarSheet() {
 
 function renderHome() {
   $app.innerHTML = screen(`
-    <div class="spacer top"></div>
-    <img class="logo" data-mk="logo" src="cards/logo.webp" alt="بانانا" draggable="false">
+    <img class="logo" data-mk="logo" src="cards/ui/logo.webp" alt="بانانا" draggable="false">
     <div class="spacer"></div>
     <div class="me-row"><button class="avatar pick-av ${myFrame() ? 'framed' : ''}" data-sheet="avatar" aria-label="غيّر صورتك">${avatarInner(myAvatar())}${frameHTML(myFrame())}<i class="pen">✎</i></button>
-    <div class="field" style="flex:1"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ui.sheet === 'gift' ? giftSheet() : ui.sheet === 'owner' ? ownerSheet() : ''}
-    <button class="plank wood" data-go="online" style="transform:rotate(-1deg);min-height:72px;font-size:1.8rem">العب مع صحابك</button>
-    <button class="plank teal" data-go="bots" style="transform:rotate(1deg);min-height:64px">العب ضد الروبوتات</button>
-    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules" style="min-height:58px">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>
+    <div class="field" style="flex:1"><span class="ribbon wdy">اسمك في اللعبة</span><input id="nm" class="wdp" maxlength="14" value="${esc(ui.name)}" placeholder="مثلاً: محمد" aria-label="اسمك"></div></div>${ui.sheet === 'avatar' ? avatarSheet() : ui.sheet === 'gift' ? giftSheet() : ui.sheet === 'owner' ? ownerSheet() : ''}
+    <button class="plank wood" data-go="online">العب مع صحابك</button>
+    <button class="plank teal" data-go="bots">العب ضد الروبوتات</button>
+    <button class="plank cream ${LS.get('learned') ? '' : 'pulse'}" data-go="rules">${LS.get('learned') ? 'ازاي ألعب؟' : 'أول مرة؟ اتعلم تلعب 🍌'}</button>
     <div class="ver">آخر تحديث: ${APP_DATE}</div>
-    <button class="round snd-home" data-ui="sound" aria-label="${soundOn() ? 'اقفل الصوت' : 'شغّل الصوت'}">${soundOn() ? '🔊' : '🔇'}</button>`, { photo: true, cls: 'home' });
+    <button class="round snd-home" data-ui="sound" aria-label="${soundOn() ? 'اقفل الصوت' : 'شغّل الصوت'}">${soundOn() ? ICON.snd : ICON.mute}</button>`, { photo: true, cls: 'home' });
 }
 
 function renderBotSetup() {
   const s = ui.setup;
   $app.innerHTML = screen(`
     ${backBtn('home')}
-    <img class="wordmark" src="cards/wordmark.webp" alt="BANANA">
+    <img class="wordmark" src="cards/ui/wordmark.webp" alt="BANANA">
     <div class="board" style="display:flex;flex-direction:column;gap:14px">
       <div class="field"><span class="ribbon">المود</span>${seg('mode', [['solo', 'فردي'], ['team', 'زوجي ٢ ضد ٢']], s.mode)}</div>
       ${s.mode === 'solo' ? `<div class="field"><span class="ribbon">عدد اللاعبين</span>${seg('count', [[3, '٣ لاعبين'], [4, '٤ لاعبين']], s.count)}</div>` : '<p class="hint">إنت وروبوت شريكك، ضد روبوتين.</p>'}
@@ -613,7 +604,7 @@ function renderBotSetup() {
       <div class="field"><span class="ribbon">الوقت</span>${seg('timed', [[true, '١٥ ثانية للدور'], [false, 'مفتوح']], s.timed)}</div>
       <div class="field"><span class="ribbon">عدد الجولات ونوعها</span>${roundsPicker('b', s.rounds, true)}</div>
     </div>
-    <button class="plank gold" data-act-ui="start-bots" style="min-height:72px;font-size:1.9rem">ابدأ</button>`);
+    <button class="plank gold signbtn" data-act-ui="start-bots">ابدأ</button>`);
 }
 
 function renderRules() {
@@ -638,7 +629,7 @@ function renderOnline() {
   }
   $app.innerHTML = screen(`
     ${backBtn('home')}
-    <img class="wordmark" src="cards/wordmark.webp" alt="BANANA">
+    <img class="wordmark" src="cards/ui/wordmark.webp" alt="BANANA">
     <button class="plank wood" data-act-ui="create-room" style="min-height:70px;font-size:1.8rem">اعمل أوضة</button>
     <div class="board" style="display:flex;flex-direction:column;gap:10px">
       ${ui.inviteCode ? `<div class="field"><span class="ribbon">اسمك في اللعبة</span><input id="nm" maxlength="14" value="${esc(ui.name || '')}" placeholder="مثلاً: محمد" aria-label="اسمك"></div>` : ''}
@@ -675,7 +666,7 @@ function renderLobby() {
     if (!p) {
       list.push(`<div class="seat-row empty"><div class="avatar" style="opacity:.4"></div><span class="nm">مكان فاضي</span>${team ? `<span class="ribbon">${team}</span>` : ''}${isHost ? `<button class="mini-btn" data-lobby="bot" data-i="${i}">+ روبوت</button>` : ''}</div>`);
     } else {
-      list.push(`<div class="seat-row">${avatarHTML('l' + i, {}, p.av, p.fr)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn" style="background:var(--pink)" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
+      list.push(`<div class="seat-row">${avatarHTML('l' + i, {}, p.av, p.fr)}<span class="nm">${esc(p.name)}</span>${p.host ? '<span class="ribbon gold">صاحب الأوضة</span>' : ''}${team ? `<span class="ribbon">${team}</span>` : ''}${isHost && p.bot ? `<button class="mini-btn c-pink" data-lobby="kick" data-i="${i}">شيل</button>` : ''}</div>`);
     }
   }
   const full = L.seats.slice(0, max).filter(Boolean).length === max;
@@ -694,7 +685,7 @@ function renderLobby() {
       <div class="field"><span class="ribbon">عدد الجولات ونوعها</span>${roundsPicker('l', s.rounds, true)}</div>
     </div>` : `<div class="board" style="display:flex;flex-direction:column;gap:8px"><p class="hint" style="margin:0">${s.mode === 'team' ? 'زوجي' : 'فردي'} — ${s.timed ? '١٥ ثانية للدور' : 'وقت مفتوح'}. مستنيين صاحب الأوضة يبدأ.</p>${roundsPicker('l', s.rounds, false)}</div>`}
     <div style="display:flex;flex-direction:column;gap:10px">${list.join('')}</div>
-    ${isHost ? `<button class="plank gold" data-lobby="start" ${full ? '' : 'disabled'} style="min-height:72px;font-size:1.8rem">ابدأ اللعب</button>` : ''}
+    ${isHost ? `<button class="plank gold signbtn" data-lobby="start" ${full ? '' : 'disabled'}>ابدأ</button>` : ''}
     ${ui.error ? `<p class="err">${esc(ui.error)}</p>` : ''}`);
 }
 
@@ -884,7 +875,7 @@ function renderGame() {
   ${v.deadline && v.timed && v.waitingOn.includes(ui.me) ? '<div class="timer-line" id="timer"><i></i></div>' : ''}
   <div class="actions">${actionsHTML()}</div>
   ${ui.peek && ui.peek.until > Date.now() ? `<div class="peek-toast">${cardSVG(ui.peek.card)}</div>` : ''}
-  ${ui.bananaCall ? `<div class="banana-call"><div class="bc-rays"></div><img src="cards/wordmark.webp" alt="بانانا!"><div class="bc-who">${esc(ui.bananaCall.pid === ui.me ? 'إنت قلت بانانا!' : pname(ui.bananaCall.pid) + ' قال بانانا!')}</div><div class="bc-sub">كل واحد ليه دور أخير</div></div>` : ''}
+  ${ui.bananaCall ? `<div class="banana-call"><div class="bc-rays"></div><img src="cards/ui/wordmark.webp" alt="بانانا!"><div class="bc-who">${esc(ui.bananaCall.pid === ui.me ? 'إنت قلت بانانا!' : pname(ui.bananaCall.pid) + ' قال بانانا!')}</div><div class="bc-sub">كل واحد ليه دور أخير</div></div>` : ''}
   ${ui.banner ? `<div class="banner"><span class="ink-text">${ui.banner}</span></div>` : ''}
   ${boardOrSheet()}
   </div>`;
@@ -900,18 +891,18 @@ function actionsHTML() {
     case 'ready':
       return p.answered ? '' : '<button class="plank gold banana-btn" data-a="ready">حفظتهم — جاهز</button>';
     case 'guard':
-      return sel.mode === 'guard' ? '<button class="plank cream" data-ui="guard-cancel">رجوع</button>' : `<button class="plank cream" data-a="noGuard">كمّل</button><button class="plank" style="background:var(--pink);color:#fff" data-ui="guard-mode">أوقفه بالـ Guard</button>`;
+      return sel.mode === 'guard' ? '<button class="plank cream" data-ui="guard-cancel">رجوع</button>' : `<button class="plank cream" data-a="noGuard">كمّل</button><button class="plank pinky" data-ui="guard-mode">أوقفه بالـ Guard</button>`;
     case 'turn': {
       const canBanana = !v.banana && !v.lastLap && me.turnsPlayed >= 3;
       const top = v.discardTop;
       return `<button class="plank wood" data-a="draw">اسحب</button>
         <button class="plank wood" data-a="take" ${top && CARD_INFO[top].tier !== 'cmd' ? '' : 'disabled'}>خد من الأرض</button>
         ${snapBtn()}
-        ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank guard-btn" style="background:var(--pink);color:#fff" data-ui="gr1">Guard</button>` : ''}
+        ${me.slots.some((x) => x.plus > 0 || x.frozen) ? `<button class="plank pinky guard-btn" data-ui="gr1">Guard</button>` : ''}
         ${!v.lastLap || v.banana ? `<button class="plank gold banana-btn" data-a="banana" ${canBanana ? '' : 'disabled'}>${canBanana ? 'بانانا!' : v.banana ? 'بانانا اتقالت' : `بانانا بعد ${3 - me.turnsPlayed} ${3 - me.turnsPlayed === 1 ? 'دور' : 'أدوار'}`}</button>` : ''}`;
     }
     case 'hold':
-      return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank" style="background:var(--pink);color:#fff" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
+      return p.from === 'deck' ? `<button class="plank wood" data-a="throw">ارمي${effectNote(p.name)}</button>${CARD_INFO[p.name].tier === 'cmd' && p.name !== 'guard' ? `<button class="plank pinky" data-ui="selfg">${sel.mode === 'selfg' ? 'إلغاء' : 'ارفضه بالـ Guard'}</button>` : ''}` : '';
     case 'extra':
       return `${sel.extraIdx != null ? `<button class="plank wood" data-ui="extra-throw">ارمي${effectNote(p.cards[sel.extraIdx].name)}</button>` : ''}
         `;
@@ -936,6 +927,7 @@ function effectNote(name) {
   return '';
 }
 
+const ccOf = (card) => `style="--cc:${CARD_INFO[card].color};--oc:${CARD_INFO[card].color}"`;
 function boardOrSheet() {
   if (ui.gated && !['menu', 'scores', 'rules-mini', 'learn', 'table'].includes(ui.sheet)) return '';
   const h = sheetHTML();
@@ -977,7 +969,7 @@ function sheetHTML() {
       if (x.plus > 0) opts.push(`<button class="opt" data-gr="${x.id}|plus"><b>شيل +5 من الخانة ${pos(x.id)}</b></button>`);
       if (x.frozen) opts.push(`<button class="opt" data-gr="${x.id}|freeze"><b>فك التجميد من الخانة ${pos(x.id)}</b></button>`);
     }
-    return `<div class="sheet-bg"><div class="sheet"><h2>استخدم Guard</h2><p>ده هيبقى دورك كله. بعدها هتضغط على كارت الـ Guard بتاعك، ولو طلع مش Guard هتلبس آخر كارت على الأرض.</p><div class="opts">${opts.join('')}<button class="plank cream" data-ui="gr1">رجوع</button></div></div></div>`;
+    return `<div class="sheet-bg"><div class="sheet sheet-dark" ${ccOf('guard')}><div class="plate"><h2>استخدم Guard</h2><p>ده هيبقى دورك كله. بعدها هتضغط على كارت الـ Guard بتاعك، ولو طلع مش Guard هتلبس آخر كارت على الأرض.</p></div><div class="opts same">${opts.join('')}<button class="plank cream" data-ui="gr1">رجوع</button></div></div></div>`;
   }
   if (p.kind === 'hold') return '';
   if (p.kind === 'extra') {
@@ -987,15 +979,15 @@ function sheetHTML() {
     if (p.answered) return '';
     const mate = v.players.find((x) => x.id !== ui.me && x.team === meP().team);
     const owner = p.owner === ui.me;
-    return `<div class="sheet-bg"><div class="sheet">
-      <h2>${cardName(p.card)}: مين ينفذ؟</h2>
-      <p>${owner ? 'إنت رميت الكارت.' : `${esc(pname(p.owner))} رمى الكارت.`} اللي ينفذ بينفذه على كروته هو. لو اختلفتوا، صاحب الكارت هو اللي ينفذ.</p>
+    return `<div class="sheet-bg"><div class="sheet sheet-dark" ${ccOf(p.card)}>
+      <div class="plate"><h2>${cardName(p.card)}: مين ينفذ؟</h2>
+      <p>${owner ? 'إنت رميت الكارت.' : `${esc(pname(p.owner))} رمى الكارت.`} اللي ينفذ بينفذه على كروته هو. لو اختلفتوا، صاحب الكارت هو اللي ينفذ.</p></div>
       <div class="float-wrap"><div class="float-card small">${cardSVG(p.card)}</div></div>
-      <div class="row"><button class="plank gold" data-delegate="${ui.me}">أنا</button><button class="plank cream" data-delegate="${mate.id}">${esc(mate.name)}</button></div>
+      <div class="row"><button class="plank gl" style="--cc:var(--oc);--ct:#fff" data-delegate="${ui.me}">أنا</button><button class="plank cream" data-delegate="${mate.id}">${esc(mate.name)}</button></div>
     </div></div>`;
   }
   if (p.kind === 'target' && p.spec.type === 'option') {
-    return `<div class="sheet-bg"><div class="sheet"><h2>Choose: اختار أمر</h2><div class="opts">
+    return `<div class="sheet-bg"><div class="sheet sheet-dark" ${ccOf('choose')}><div class="plate"><h2>Choose: اختار أمر</h2></div><div class="opts same">
       ${p.spec.options.map((o) => `<button class="opt" data-option="${o}"><b>${OPTION_AR[o][0]}</b><span>${OPTION_AR[o][1]}</span></button>`).join('')}
     </div></div></div>`;
   }
@@ -1004,7 +996,7 @@ function sheetHTML() {
     const pos = (sid) => me.slots.findIndex((s) => s.id === sid) + 1;
     const label = { card: (o) => `ارمي الكارت رقم ${pos(o.slotId)}`, plus: (o) => `شيل +5 من الخانة ${pos(o.slotId)}`, freeze: (o) => `فك التجميد من الخانة ${pos(o.slotId)}` };
     const isGuard = p.step === 'guardFix';
-    return `<div class="sheet-bg"><div class="sheet"><h2>${isGuard ? 'Guard' : 'Clear'}</h2><p>${isGuard ? 'اختار تشيل +5 أو التجميد من واحدة من خاناتك.' : 'ارمي أي كارت من كروتك، أو شيل +5 أو تجميد من خاناتك.'}</p><div class="opts">
+    return `<div class="sheet-bg"><div class="sheet sheet-dark" ${ccOf(isGuard ? 'guard' : 'clear')}><div class="plate"><h2>${isGuard ? 'Guard' : 'Clear'}</h2><p>${isGuard ? 'اختار تشيل +5 أو التجميد من واحدة من خاناتك.' : 'ارمي أي كارت من كروتك، أو شيل +5 أو تجميد من خاناتك.'}</p></div><div class="opts same">
       ${p.spec.options.map((o) => `<button class="opt" data-clear="${o.slotId}|${o.what}"><b>${label[o.what](o)}</b></button>`).join('')}
     </div></div></div>`;
   }
@@ -1019,12 +1011,16 @@ function boardWrap(title, body, { close = false, sub = '' } = {}) {
   const fresh = ui.boardShown !== title;
   ui.boardShown = title;
   return `<div class="sheet-bg wbg" ${close ? 'data-close="1"' : ''}><div class="woodboard ${fresh ? 'pop' : ''}">
-    ${leafSVG('wb-leaf', 'left:-60px;top:-50px;transform:rotate(25deg) scale(.55)')}${leafSVG('wb-leaf', 'right:-60px;top:-55px;transform:scaleX(-1) rotate(25deg) scale(.55)')}
     <div class="wb-title">${title}</div>${sub ? `<div class="wb-sub">${sub}</div>` : ''}
     <div class="wb-body">${body}</div></div></div>`;
 }
 
 function teamTag(v, p) { return v.mode === 'team' ? `<span class="ribbon ${p.team === 0 ? 'sky' : 'pink'}">${p.team === 0 ? 'فريق أ' : 'فريق ب'}</span>` : ''; }
+
+// Every player has a colour on the score boards.
+const PCOL = [['#ffc21a', '#7a2508'], ['#24aee8', '#fff'], ['#45b33c', '#fff'], ['#9b4fe0', '#fff']];
+const pcol = (p) => { const i = Math.max(0, ui.view.players.findIndex((x) => x.id === p.id)) % 4; return `style="--cc:${PCOL[i][0]};--ct:${PCOL[i][1]}"`; };
+const meName = (p) => (p.id === ui.me ? 'إنت' : esc(p.name));
 
 // One player's whole game: score and cards of every round.
 function playerRounds(p) {
@@ -1034,24 +1030,27 @@ function playerRounds(p) {
     const h = hands[r] || {};
     const pk = planOf(v)[r];
     const label = r < planOf(v).length ? `الجولة ${RN[r]}${KIND_SHORT[pk] ? ` (${KIND_SHORT[pk]})` : ''}` : 'جولة فاصلة';
-    return `<div class="pr-row ${h.win ? 'win' : ''}">
-      <div class="pr-top"><b>${label}</b>${h.win ? '<span class="chip gold">كسب 👑</span>' : ''}<span class="chip">كروته <b>${h.sum ?? '·'}</b></span><span class="chip dark">السكور <b>${sc}</b></span></div>
+    return `<div class="prow-box gl ${h.win ? 'win' : ''}" ${pcol(p)}>
+      <div class="rtop"><b class="rlabel">${label}</b>${h.win ? '<span class="chip gold">كسب 👑</span>' : ''}<span class="chip">كروته <b>${h.sum ?? '·'}</b></span><span class="chip dark">السكور <b>${sc}</b></span></div>
       ${h.slots ? miniHand(h.slots) : ''}
     </div>`;
   }).join('') || '<p class="wb-hint">لسه مفيش جولات خلصت</p>';
-  return `<div class="pr-head">${avatarHTML(p.id, {}, p.av, p.fr)}<div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}</div><span class="chip dark">المجموع <b>${p.total}</b></span></div>
-    <div class="pr-list">${rows}</div>
+  return `<div class="prow gl" ${pcol(p)}>${avatarHTML(p.id, {}, p.av, p.fr)}<div class="pn2"><b>${meName(p)}</b>${teamTag(v, p)}</div><span class="big">${p.total}</span></div>
+    <div class="plist">${rows}</div>
     <button class="plank cream" data-ph="">رجوع للسكور</button>`;
+}
+
+function roundChips(p) {
+  const plan = planOf(ui.view);
+  return `<div class="rds">${plan.map((k, r) => `<i class="${k === 'double' ? 'x2' : ''}"><u>ج${RN[r]}</u> ${p.roundScores[r] ?? '·'}</i>`).join('')}${p.roundScores.length > plan.length ? p.roundScores.slice(plan.length).map((x) => `<i>فاصلة: ${x}</i>`).join('') : ''}</div>`;
 }
 
 function scoresSheet() {
   const v = ui.view;
   const sel = ui.scorePid && v.players.find((x) => x.id === ui.scorePid);
   if (sel) return boardWrap('السكور', playerRounds(sel), { close: true });
-  const plan = planOf(v);
-  const head = `<tr><th></th>${plan.map((k, i) => `<th>${RN[i]}${k === 'double' ? '<small>×٢</small>' : ''}</th>`).join('')}<th>المجموع</th></tr>`;
-  const rows = v.players.map((p) => `<tr class="tap" data-ph="${p.id}"><td><div class="wb-who">${avatarHTML(p.id, { small: true }, p.av, p.fr)}<span>${p.id === ui.me ? 'إنت' : esc(p.name)}</span><i class="more">‹</i></div></td>${plan.map((_, r) => `<td>${p.roundScores[r] ?? '·'}</td>`).join('')}<td><b class="tot">${p.total}</b></td></tr>`).join('');
-  return boardWrap('السكور', `<div class="parch"><table class="wb-table">${head}${rows}</table></div>
+  const rows = v.players.map((p) => `<div class="prow gl tap" ${pcol(p)} data-ph="${p.id}">${avatarHTML(p.id, { small: true }, p.av, p.fr)}<div class="pn2"><b>${meName(p)}</b>${roundChips(p)}</div><span class="big">${p.total}</span><i class="more">‹</i></div>`).join('');
+  return boardWrap('السكور', `<div class="plist">${rows}</div>
     <p class="wb-hint">دوس على أي لاعب تشوف كروته في كل جولة 🍌</p>
     <button class="plank cream" data-close="1">رجوع</button>`, { close: true });
 }
@@ -1067,17 +1066,16 @@ function roundSheet() {
     const p = v.players.find((x) => x.id === d.pid);
     const u = v.mode === 'team' ? p.team : i;
     const win = e.wins[u];
-    return `<div class="rs-row ${win ? 'win' : ''}">
-      <div class="rs-top">${avatarHTML(p.id, {}, p.av, p.fr)}${win ? '<span class="crown">👑</span>' : ''}
-        <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}</div>
-        <div class="rs-nums"><span class="chip">كروته <b>${d.sum}</b></span><span class="chip ${win ? 'gold' : ''}">${win ? 'كسب الجولة' : 'السكور'} <b>${e.scores[u]}</b></span><span class="chip dark">المجموع <b>${p.total}</b></span></div>
-      </div>
+    return `<div class="prow-box gl ${win ? 'win' : ''}" ${pcol(p)}>
+      <div class="prow">${avatarHTML(p.id, {}, p.av, p.fr)}${win ? '<span class="crown2">👑</span>' : ''}
+        <div class="pn2"><b>${meName(p)}</b>${teamTag(v, p)}</div><span class="big">${p.total}</span></div>
+      <div class="rtop"><span class="chip">كروته <b>${d.sum}</b></span><span class="chip ${win ? 'gold' : ''}">${win ? 'كسب الجولة' : 'السكور'} <b>${e.scores[u]}</b></span></div>
       ${miniHand(d.slots)}
     </div>`;
   }).join('');
   const title = e.tiebreak ? 'الجولة الفاصلة' : `آخر الجولة ${RN[e.round - 1] || e.round}`;
   const sub = [e.mult === 2 ? 'الجولة دي النقط فيها × ٢' : '', v.mode === 'team' ? 'سكور الفريق = مجموع كروت الشريكين' : '', 'اللي كسب الجولة بياخد صفر'].filter(Boolean).join(' · ');
-  return boardWrap(title, `<div class="rs-list">${rows}</div>
+  return boardWrap(title, `<div class="plist">${rows}</div>
     ${isHost ? '<button class="plank gold" data-a="next">الجولة الجاية</button>' : '<p class="wb-hint">مستنيين صاحب الأوضة يبدأ الجولة الجاية…</p>'}`, { sub });
 }
 
@@ -1091,16 +1089,15 @@ function gameOverSheet() {
   const rows = ranked.map((p, k) => {
     if (k > 0 && p.total !== ranked[k - 1].total) rank = k;
     const w = winners.includes(p.id);
-    return `<div class="go-row tap ${w ? 'win' : ''}" data-ph="${p.id}"><span class="medal">${medal[rank]}</span>${avatarHTML(p.id, {}, p.av, p.fr)}
-      <div class="rs-name"><b>${p.id === ui.me ? 'إنت' : esc(p.name)}</b>${teamTag(v, p)}<div class="go-rounds">${p.roundScores.map((x, r) => `<i title="الجولة ${r + 1}">${x}</i>`).join('')}</div></div>
-      <span class="chip ${w ? 'gold' : 'dark'}"><b>${p.total}</b></span></div>`;
+    return `<div class="prow gl tap ${w ? 'win' : ''}" ${pcol(p)} data-ph="${p.id}"><span class="medal">${medal[rank]}</span>${avatarHTML(p.id, {}, p.av, p.fr)}
+      <div class="pn2"><b>${meName(p)}</b>${teamTag(v, p)}${roundChips(p)}</div><span class="big">${p.total}</span></div>`;
   }).join('');
   const champ = winners.map((w) => esc(w === ui.me ? 'إنت' : pname(w))).join(' و');
   const sel = ui.scorePid && v.players.find((x) => x.id === ui.scorePid);
   if (sel) return boardWrap(iWon ? 'كسبت! 🍌👑' : 'خلصت اللعبة!', playerRounds(sel));
   return boardWrap(iWon ? 'كسبت! 🍌👑' : 'خلصت اللعبة!', `
     <div class="go-champ">${winners.slice(0, 2).map((w) => { const p = v.players.find((x) => x.id === w); return p ? avatarHTML(p.id, {}, p.av, p.fr) : ''; }).join('')}<div>بطل البنانا: <b>${champ}</b></div></div>
-    <div class="go-list">${rows}</div>
+    <div class="plist">${rows}</div>
     <p class="wb-hint">دوس على أي لاعب تشوف كروته في كل جولة</p>
     <div class="row">
       ${ui.conn && ui.conn.local ? '<button class="plank gold" data-ui="again">العب تاني</button>' : ''}
@@ -1178,11 +1175,38 @@ $app.addEventListener('pointerdown', (ev) => {
 });
 
 // Touching the monkeys or the logo on the home screen (and the secret code).
+// Taps count only on the painted pixels of the parrot, the monkey or the logo
+// (never on their empty corners), so the three never overlap.
+const alphaCache = new Map();
+function alphaAt(img, x, y) {
+  const r = img.getBoundingClientRect();
+  if (x < r.left || x > r.right || y < r.top || y > r.bottom || !img.naturalWidth) return 0;
+  let c = alphaCache.get(img.src);
+  if (!c) {
+    const cv = document.createElement('canvas');
+    cv.width = Math.min(img.naturalWidth, 320); cv.height = Math.round(cv.width * img.naturalHeight / img.naturalWidth);
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    g.drawImage(img, 0, 0, cv.width, cv.height);
+    try { c = { w: cv.width, h: cv.height, d: g.getImageData(0, 0, cv.width, cv.height).data }; } catch { return 1; }
+    alphaCache.set(img.src, c);
+  }
+  // the moving pieces are rotated a little; sampling the box is close enough
+  const px = Math.floor((x - r.left) / r.width * c.w), py = Math.floor((y - r.top) / r.height * c.h);
+  return c.d[(Math.min(c.h - 1, py) * c.w + Math.min(c.w - 1, px)) * 4 + 3] / 255;
+}
+function mkAt(x, y) {
+  for (const sel of ['.lay.monkey', '.lay.parrot', '.logo']) {
+    const el = $app.querySelector(sel);
+    if (el && el.dataset.mk && alphaAt(el, x, y) > 0.35) return el.dataset.mk;
+  }
+  return null;
+}
 $app.addEventListener('pointerdown', (ev) => {
-  const t = ev.target.closest('[data-mk]');
-  if (!t || !t.dataset.mk || ui.screen !== 'home' || ui.sheet) return;
-  sfx(t.dataset.mk === 'logo' ? 'tap' : 'monkey');
-  onSecretTap($app, t.dataset.mk, (gift) => {
+  if (ui.screen !== 'home' || ui.sheet || ev.target.closest('button, input, .avatar')) return;
+  const mk = mkAt(ev.clientX, ev.clientY);
+  if (!mk) return;
+  sfx(mk === 'logo' ? 'tap' : 'monkey');
+  onSecretTap($app, mk, (gift) => {
     sfx('gift');
     // the gift becomes yours right away (you can still change it)
     if (gift.kind === 'frame') ui.frame = gift.id;

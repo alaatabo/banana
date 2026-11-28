@@ -1,7 +1,7 @@
 // Home screen: the monkeys and the logo react when touched, and a secret
 // order of taps unlocks a gift. Nothing tells the player the order is wrong.
 //
-// Code: right monkey, logo, left monkey, right monkey, left monkey, logo.
+// Code: monkey (right), logo, parrot (left), monkey, parrot, logo.
 // One random gift per visit; it lasts until the page is reloaded.
 // Owner: tap the logo 7 times in a row, then type the owner number.
 const CODE = ['R', 'logo', 'L', 'R', 'L', 'logo'];
